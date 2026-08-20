@@ -1,14 +1,15 @@
 import os
 import time
 import streamlit as st
+import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
 
 # -----------------------------------------------------------------------------
-# 1. PARAMÉTRAGE DU SUJET ET DU BARÈME (À MODIFIER SELON LE CAS)
+# 1. PARAMÉTRAGE DU SUJET ET DU BARÈME
 # -----------------------------------------------------------------------------
 SUJET_ETUDIANT = """
-### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture) v2
+### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture) v3
 
 **Patient :** M. X, 48 ans.
 **Motif de consultation :** Douleur pulsatile au niveau du secteur 2 depuis 48h, exacerbée au chaud.
@@ -30,7 +31,6 @@ DUREE_LECTURE = 120    # 2 minutes = 120 s
 DUREE_ECHANGE = 480    # 8 minutes = 480 s
 DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
 
-# Modèle recommandé stable
 MODEL_NAME = "gemini-2.0-flash"
 
 SYSTEM_INSTRUCTION = f"""
@@ -74,7 +74,7 @@ if "messages" not in st.session_state:
 if "eval_generated" not in st.session_state:
     st.session_state.eval_generated = False
 
-# Écran initial
+# Écran de démarrage
 if st.session_state.start_time is None:
     st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'échange avec l'examinateur.")
     if st.button("Démarrer la station (10 minutes)"):
@@ -85,33 +85,64 @@ if st.session_state.start_time is None:
 # Calcul du temps écoulé
 elapsed = time.time() - st.session_state.start_time
 
-# Affichage des consignes
+# Affichage du dossier patient
 with st.expander("Consignes et dossier patient", expanded=True):
     st.markdown(SUJET_ETUDIANT)
 
 st.divider()
 
-# --- PHASE 1 : LECTURE SEULE (0 à 2 minutes) ---
+# --- COMPTE À REBOURS JAVASCRIPT FLUIDE & AUTONOME ---
+def afficher_chronometre(duree_cible_secondes, label_phase, alert_color):
+    secondes_restantes = max(0, int(duree_cible_secondes - elapsed))
+    chrono_html = f"""
+    <div style="background-color: {alert_color}; padding: 12px; border-radius: 8px; border-left: 6px solid #333; margin-bottom: 15px;">
+        <span style="font-size: 15px; font-weight: bold; color: #111;">{label_phase} : </span>
+        <span id="timer_display" style="font-size: 20px; font-family: monospace; font-weight: bold; color: #000;">--:--</span>
+    </div>
+
+    <script>
+    let remaining = {secondes_restantes};
+    function updateTimer() {{
+        let mins = Math.floor(remaining / 60);
+        let secs = remaining % 60;
+        let formatted = (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
+        let elem = document.getElementById("timer_display");
+        if (elem) {{
+            elem.innerText = formatted;
+        }}
+        if (remaining <= 0) {{
+            // Force le rechargement de Streamlit dès que la phase arrive à 0
+            window.parent.postMessage({{type: 'streamlit:setComponentValue', value: true}}, '*');
+            setTimeout(function() {{
+                window.parent.location.reload();
+            }}, 500);
+        }} else {{
+            remaining--;
+            setTimeout(updateTimer, 1000);
+        }}
+    }}
+    updateTimer();
+    </script>
+    """
+    components.html(chrono_html, height=70)
+
+# --- GESTION DES 3 PHASES ---
+
+# Phase 1 : Lecture seule (0 à 2 min)
 if elapsed < DUREE_LECTURE:
-    tps_restant_lecture = int(DUREE_LECTURE - elapsed)
-    mins, secs = divmod(tps_restant_lecture, 60)
-    st.warning(f"Phase de lecture en cours. Ouverture de l'oral dans : **{mins:02d}:{secs:02d}**")
-    st.caption("Le champ de réponse est verrouillé pendant la lecture. La page se mettra à jour automatiquement.")
-    time.sleep(2)
-    st.rerun()
+    afficher_chronometre(DUREE_LECTURE, "Phase de lecture — Dialogue ouvert dans", "#FFF3CD")
+    st.caption("Le champ de réponse est désactivé pendant la phase de lecture.")
 
-# --- PHASE 2 : ÉCHANGE ORAL (2 à 10 minutes) ---
+# Phase 2 : Échange oral (2 à 10 min)
 elif elapsed < DUREE_TOTALE:
-    tps_restant_oral = int(DUREE_TOTALE - elapsed)
-    mins, secs = divmod(tps_restant_oral, 60)
-    st.info(f"Phase d'échange en cours. Temps restant : **{mins:02d}:{secs:02d}**")
+    afficher_chronometre(DUREE_TOTALE, "Phase d'échange — Clôture de l'épreuve dans", "#D1ECF1")
 
-    # Premier message de l'examinateur
+    # Initialisation du premier échange
     if not st.session_state.messages:
         premier_message = "Bonjour. Vous avez pris connaissance du dossier. Veuillez exposer votre démarche clinique."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
 
-    # Affichage des messages
+    # Historique de la conversation
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -120,7 +151,6 @@ elif elapsed < DUREE_TOTALE:
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         
-        # Préparation du contenu pour l'API
         contents = []
         for m in st.session_state.messages:
             r = "model" if m["role"] == "assistant" else "user"
@@ -134,15 +164,15 @@ elif elapsed < DUREE_TOTALE:
             )
             st.session_state.messages.append({"role": "assistant", "content": response.text})
         except Exception as e:
-            st.error(f"Erreur de communication avec l'examinateur : {str(e)}")
+            st.error(f"Erreur API : {str(e)}")
             
         st.rerun()
 
-# --- PHASE 3 : FIN DE STATION & ÉVALUATION ---
+# Phase 3 : Fin de station & Évaluation
 else:
     st.error("Temps réglementaire de 10 minutes écoulé. L'épreuve est terminée.")
 
-    # Génération du bilan évaluatif
+    # Synthèse de l'évaluation
     if not st.session_state.eval_generated:
         with st.spinner("Génération du bilan évaluatif..."):
             history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
@@ -157,16 +187,16 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 st.session_state.eval_generated = True
             except Exception as e:
-                st.error(f"Erreur lors de la génération de l'évaluation : {str(e)}")
+                st.error(f"Erreur évaluation : {str(e)}")
                 
         st.rerun()
 
-    # Affichage du fil complet avec l'évaluation
+    # Affichage du fil complet avec le bilan
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Questions post-évaluation
+    # Questions post-évaluation (débriefing)
     post_eval_input = st.chat_input("Posez vos questions sur le débriefing clinique...")
     if post_eval_input:
         st.session_state.messages.append({"role": "user", "content": post_eval_input})
@@ -184,6 +214,6 @@ else:
             )
             st.session_state.messages.append({"role": "assistant", "content": response.text})
         except Exception as e:
-            st.error(f"Erreur lors du débriefing : {str(e)}")
+            st.error(f"Erreur débriefing : {str(e)}")
             
         st.rerun()
