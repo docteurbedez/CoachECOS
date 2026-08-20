@@ -9,7 +9,7 @@ from google.genai import types
 # 1. PARAMÉTRAGE DU SUJET ET DU BARÈME
 # -----------------------------------------------------------------------------
 SUJET_ETUDIANT = """
-### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture) v4
+### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture) v5
 
 **Patient :** M. X, 48 ans.
 **Motif de consultation :** Douleur pulsatile au niveau du secteur 2 depuis 48h, exacerbée au chaud.
@@ -31,7 +31,8 @@ DUREE_LECTURE = 120    # 2 minutes = 120 s
 DUREE_ECHANGE = 480    # 8 minutes = 480 s
 DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
 
-MODEL_NAME = "gemini-2.0-flash"
+# Mise à jour requise vers la dernière version de l'API
+MODEL_NAME = "gemini-3.6-flash"
 
 SYSTEM_INSTRUCTION = f"""
 Tu es un examinateur neutre et rigoureux pour une station d'examen clinique objectif structuré (ECOS) de 8 minutes de dialogue.
@@ -96,11 +97,44 @@ elapsed = time.time() - st.session_state.start_time
 # --- PHASE 1 : LECTURE SEULE (0 à 2 minutes) ---
 if elapsed < DUREE_LECTURE and not st.session_state.force_end:
     tps_restant = int(DUREE_LECTURE - elapsed)
-    mins, secs = divmod(tps_restant, 60)
-    st.warning(f"Phase de lecture — Ouverture de l'oral dans : **{mins:02d}:{secs:02d}**")
+    
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("Passer la lecture", use_container_width=True):
+            # Recule artificiellement le chronomètre pour démarrer l'oral immédiatement
+            st.session_state.start_time = time.time() - DUREE_LECTURE
+            st.rerun()
+
+    js_code_lecture = f"""
+    <div id="chrono_lecture" style="background:#FFF3CD; color:#856404; padding:10px; border-radius:6px; font-weight:bold; font-size:16px; font-family:monospace; text-align:center; border: 1px solid #FFEEBA;">
+        Synchronisation...
+    </div>
+    <script>
+    var duration = {tps_restant};
+    var endTime = Date.now() + (duration * 1000);
+    var display = document.getElementById("chrono_lecture");
+    
+    var timer = setInterval(function() {{
+        var now = Date.now();
+        var remaining = Math.round((endTime - now) / 1000);
+        
+        if (remaining <= 0) {{
+            clearInterval(timer);
+            display.innerHTML = "Ouverture de l'oral...";
+            window.parent.location.reload();
+        }} else {{
+            var mins = Math.floor(remaining / 60);
+            var secs = remaining % 60;
+            var form = (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
+            display.innerHTML = "⏳ Phase de lecture — " + form;
+        }}
+    }}, 500);
+    </script>
+    """
+    with col1:
+        components.html(js_code_lecture, height=50)
+        
     st.caption("Le champ de réponse est verrouillé pendant la lecture.")
-    time.sleep(1)
-    st.rerun()
 
 # --- PHASE 2 : ÉCHANGE CONVERSATIONNEL (2 à 10 minutes) ---
 elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
@@ -113,7 +147,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             st.session_state.force_end = True
             st.rerun()
 
-    # Compte à rebours basé sur l'horloge système (Date.now) pour éviter le blocage du navigateur
+    # Compte à rebours basé sur l'horloge système
     js_code = f"""
     <div id="chrono" style="background:#D1ECF1; color:#0C5460; padding:10px; border-radius:6px; font-weight:bold; font-size:16px; font-family:monospace; text-align:center; border: 1px solid #B8DAFF;">
         Synchronisation...
