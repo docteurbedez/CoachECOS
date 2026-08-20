@@ -8,7 +8,7 @@ from google.genai import types
 # 1. PARAMÉTRAGE DU SUJET ET DU BARÈME (À MODIFIER SELON LE CAS)
 # -----------------------------------------------------------------------------
 SUJET_ETUDIANT = """
-### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture)
+### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture) v2
 
 **Patient :** M. X, 48 ans.
 **Motif de consultation :** Douleur pulsatile au niveau du secteur 2 depuis 48h, exacerbée au chaud.
@@ -26,14 +26,13 @@ BAREME_SECRET = """
 4. Gestion des risques et communication : Prise en compte de l'hypertension pour l'anesthésie (vasoconstricteur adapté), clarté de l'information donnée au patient (Pondération : 15%).
 """
 
-# Durées en secondes
 DUREE_LECTURE = 120    # 2 minutes = 120 s
 DUREE_ECHANGE = 480    # 8 minutes = 480 s
 DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
 
-# -----------------------------------------------------------------------------
-# 2. INSTRUCTIONS SYSTÈME POUR LE MODÈLE
-# -----------------------------------------------------------------------------
+# Modèle recommandé stable
+MODEL_NAME = "gemini-2.0-flash"
+
 SYSTEM_INSTRUCTION = f"""
 Tu es un examinateur neutre et rigoureux pour une station d'examen clinique objectif structuré (ECOS) de 8 minutes de dialogue.
 
@@ -60,9 +59,6 @@ POSTURE EN PHASE DE DÉBRIEFING (après l'évaluation) :
 - Refuse fermement de donner la pondération chiffrée du barème s'il la réclame.
 """
 
-# -----------------------------------------------------------------------------
-# 3. INTERFACE ET LOGIQUE DE FLUX
-# -----------------------------------------------------------------------------
 st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 st.title("Station d'évaluation standardisée")
 
@@ -70,7 +66,7 @@ st.title("Station d'évaluation standardisée")
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
 client = genai.Client(api_key=api_key)
 
-# Gestion de l'état de session
+# Initialisation de l'état de session
 if "start_time" not in st.session_state:
     st.session_state.start_time = None
 if "messages" not in st.session_state:
@@ -78,7 +74,7 @@ if "messages" not in st.session_state:
 if "eval_generated" not in st.session_state:
     st.session_state.eval_generated = False
 
-# Écran de démarrage
+# Écran initial
 if st.session_state.start_time is None:
     st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'échange avec l'examinateur.")
     if st.button("Démarrer la station (10 minutes)"):
@@ -89,7 +85,7 @@ if st.session_state.start_time is None:
 # Calcul du temps écoulé
 elapsed = time.time() - st.session_state.start_time
 
-# Affichage du corpus d'informations
+# Affichage des consignes
 with st.expander("Consignes et dossier patient", expanded=True):
     st.markdown(SUJET_ETUDIANT)
 
@@ -99,23 +95,23 @@ st.divider()
 if elapsed < DUREE_LECTURE:
     tps_restant_lecture = int(DUREE_LECTURE - elapsed)
     mins, secs = divmod(tps_restant_lecture, 60)
-    st.warning(f"Phase de lecture en cours. Temps restant avant l'ouverture du dialogue : {mins:02d}:{secs:02d}")
-    st.caption("Le champ de saisie est désactivé pendant cette phase.")
-    time.sleep(1)
+    st.warning(f"Phase de lecture en cours. Ouverture de l'oral dans : **{mins:02d}:{secs:02d}**")
+    st.caption("Le champ de réponse est verrouillé pendant la lecture. La page se mettra à jour automatiquement.")
+    time.sleep(2)
     st.rerun()
 
-# --- PHASE 2 : ÉCHANGE CONVERSATIONNEL (2 à 10 minutes) ---
+# --- PHASE 2 : ÉCHANGE ORAL (2 à 10 minutes) ---
 elif elapsed < DUREE_TOTALE:
     tps_restant_oral = int(DUREE_TOTALE - elapsed)
     mins, secs = divmod(tps_restant_oral, 60)
-    st.info(f"Phase d'échange en cours. Temps restant : {mins:02d}:{secs:02d}")
+    st.info(f"Phase d'échange en cours. Temps restant : **{mins:02d}:{secs:02d}**")
 
-    # Message d'accueil de l'examinateur si début de l'oral
+    # Premier message de l'examinateur
     if not st.session_state.messages:
         premier_message = "Bonjour. Vous avez pris connaissance du dossier. Veuillez exposer votre démarche clinique."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
 
-    # Affichage des échanges
+    # Affichage des messages
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -124,61 +120,70 @@ elif elapsed < DUREE_TOTALE:
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         
-        contents = [
-            types.Content(
-                role="model" if m["role"] == "assistant" else "user",
-                parts=[types.Part.from_text(text=m["content"])]
-            ) for m in st.session_state.messages
-        ]
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
-        )
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
-        st.rerun()
+        # Préparation du contenu pour l'API
+        contents = []
+        for m in st.session_state.messages:
+            r = "model" if m["role"] == "assistant" else "user"
+            contents.append(types.Content(role=r, parts=[types.Part.from_text(text=m["content"])]))
 
-# --- PHASE 3 : FIN DES 10 MINUTES & DÉBRIEFING ---
-else:
-    st.error("Temps réglementaire de 10 minutes écoulé. L'épreuve est terminée.")
-
-    # Génération de l'évaluation finale une seule fois
-    if not st.session_state.eval_generated:
-        with st.spinner("Génération du bilan évaluatif..."):
-            history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
-            eval_request = f"Voici la transcription complète de l'oral de 8 minutes :\n{history_text}\n\n[TEMPS ÉCOULÉ] Rédige le bilan évaluatif en appliquant strictement les consignes (Satisfaisant / En cours d'acquisition / Insuffisant) sans dévoiler la pondération chiffrée."
-            
+        try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=eval_request,
+                model=MODEL_NAME,
+                contents=contents,
                 config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
             )
             st.session_state.messages.append({"role": "assistant", "content": response.text})
-            st.session_state.eval_generated = True
-            st.rerun()
+        except Exception as e:
+            st.error(f"Erreur de communication avec l'examinateur : {str(e)}")
+            
+        st.rerun()
 
-    # Affichage de l'historique complet + évaluation
+# --- PHASE 3 : FIN DE STATION & ÉVALUATION ---
+else:
+    st.error("Temps réglementaire de 10 minutes écoulé. L'épreuve est terminée.")
+
+    # Génération du bilan évaluatif
+    if not st.session_state.eval_generated:
+        with st.spinner("Génération du bilan évaluatif..."):
+            history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+            eval_prompt = f"Voici la transcription complète de l'oral de 8 minutes :\n\n{history_text}\n\n[TEMPS ÉCOULÉ] Rédige le bilan évaluatif en appliquant strictement les consignes (Satisfaisant / En cours d'acquisition / Insuffisant) sans dévoiler la pondération chiffrée."
+            
+            try:
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=eval_prompt,
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
+                )
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                st.session_state.eval_generated = True
+            except Exception as e:
+                st.error(f"Erreur lors de la génération de l'évaluation : {str(e)}")
+                
+        st.rerun()
+
+    # Affichage du fil complet avec l'évaluation
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Possibilité de poser des questions de débriefing
-    post_eval_input = st.chat_input("Posez vos questions sur le débriefing (le barème restera confidentiel)...")
+    # Questions post-évaluation
+    post_eval_input = st.chat_input("Posez vos questions sur le débriefing clinique...")
     if post_eval_input:
         st.session_state.messages.append({"role": "user", "content": post_eval_input})
         
-        contents = [
-            types.Content(
-                role="model" if m["role"] == "assistant" else "user",
-                parts=[types.Part.from_text(text=m["content"])]
-            ) for m in st.session_state.messages
-        ]
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
-        )
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
+        contents = []
+        for m in st.session_state.messages:
+            r = "model" if m["role"] == "assistant" else "user"
+            contents.append(types.Content(role=r, parts=[types.Part.from_text(text=m["content"])]))
+
+        try:
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=contents,
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
+            )
+            st.session_state.messages.append({"role": "assistant", "content": response.text})
+        except Exception as e:
+            st.error(f"Erreur lors du débriefing : {str(e)}")
+            
         st.rerun()
