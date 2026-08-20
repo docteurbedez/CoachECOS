@@ -1,6 +1,7 @@
 import os
 import time
 import streamlit as st
+import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
 
@@ -8,12 +9,12 @@ from google.genai import types
 # 1. PARAMÉTRAGE DU SUJET ET DU BARÈME
 # -----------------------------------------------------------------------------
 SUJET_ETUDIANT = """
-### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture)
+### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture) v4
 
-**Patient :** M. X, 48 ans.  
-**Motif de consultation :** Douleur pulsatile au niveau du secteur 2 depuis 48h, exacerbée au chaud.  
-**Antécédents :** Tabagisme (15 paquets/an), hypertension artérielle traitée sous IEC.  
-**Données cliniques :** Restauration volumineuse en résine composite sur 26, test au froid négatif, percussion axiale très douloureuse. Pas d'adénopathie palpable, état général conservé.  
+**Patient :** M. X, 48 ans.
+**Motif de consultation :** Douleur pulsatile au niveau du secteur 2 depuis 48h, exacerbée au chaud.
+**Antécédents :** Tabagisme (15 paquets/an), hypertension artérielle traitée sous IEC.
+**Données cliniques :** Restauration volumineuse en résine composite sur 26, test au froid négatif, percussion axiale très douloureuse. Pas d'adénopathie palpable, état général conservé.
 
 *Prenez connaissance de ces éléments. L'échange débutera automatiquement à la fin du compte à rebours de lecture.*
 """
@@ -72,6 +73,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "eval_generated" not in st.session_state:
     st.session_state.eval_generated = False
+if "force_end" not in st.session_state:
+    st.session_state.force_end = False
 
 # Écran de démarrage
 if st.session_state.start_time is None:
@@ -87,28 +90,69 @@ with st.expander("Consignes et dossier patient", expanded=True):
 
 st.divider()
 
-# Emplacement réservé pour le chronomètre dynamique
-chrono_placeholder = st.empty()
-
 # Calcul du temps écoulé réel
 elapsed = time.time() - st.session_state.start_time
 
 # --- PHASE 1 : LECTURE SEULE (0 à 2 minutes) ---
-if elapsed < DUREE_LECTURE:
+if elapsed < DUREE_LECTURE and not st.session_state.force_end:
     tps_restant = int(DUREE_LECTURE - elapsed)
     mins, secs = divmod(tps_restant, 60)
-    chrono_placeholder.warning(f"Phase de lecture — Début de l'épreuve dans : **{mins:02d}:{secs:02d}**")
+    st.warning(f"Phase de lecture — Ouverture de l'oral dans : **{mins:02d}:{secs:02d}**")
     st.caption("Le champ de réponse est verrouillé pendant la lecture.")
     time.sleep(1)
     st.rerun()
 
 # --- PHASE 2 : ÉCHANGE CONVERSATIONNEL (2 à 10 minutes) ---
-elif elapsed < DUREE_TOTALE:
+elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     tps_restant = int(DUREE_TOTALE - elapsed)
-    mins, secs = divmod(tps_restant, 60)
-    chrono_placeholder.info(f"Phase d'échange — Clôture de l'épreuve dans : **{mins:02d}:{secs:02d}**")
+    
+    # Interface du compte à rebours + Bouton de clôture
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("Clôturer l'épreuve", use_container_width=True):
+            st.session_state.force_end = True
+            st.rerun()
 
-    # Message initial automatique au passage à la phase 2
+    # Compte à rebours basé sur l'horloge système (Date.now) pour éviter le blocage du navigateur
+    js_code = f"""
+    <div id="chrono" style="background:#D1ECF1; color:#0C5460; padding:10px; border-radius:6px; font-weight:bold; font-size:16px; font-family:monospace; text-align:center; border: 1px solid #B8DAFF;">
+        Synchronisation...
+    </div>
+    <script>
+    var duration = {tps_restant};
+    var endTime = Date.now() + (duration * 1000);
+    var display = document.getElementById("chrono");
+    
+    var timer = setInterval(function() {{
+        var now = Date.now();
+        var remaining = Math.round((endTime - now) / 1000);
+        
+        if (remaining <= 0) {{
+            clearInterval(timer);
+            display.innerHTML = "Temps écoulé ! Validation...";
+            display.style.background = "#F8D7DA";
+            display.style.color = "#721C24";
+            
+            // Clic automatique sur le bouton de clôture côté Streamlit
+            var buttons = window.parent.document.querySelectorAll('button');
+            buttons.forEach(function(btn) {{
+                if (btn.innerText.includes("Clôturer l'épreuve")) {{
+                    btn.click();
+                }}
+            }});
+        }} else {{
+            var mins = Math.floor(remaining / 60);
+            var secs = remaining % 60;
+            var form = (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
+            display.innerHTML = "⏱️ Phase d'échange — " + form;
+        }}
+    }}, 500);
+    </script>
+    """
+    with col1:
+        components.html(js_code, height=50)
+
+    # Message initial automatique
     if not st.session_state.messages:
         premier_message = "Bonjour. Vous avez pris connaissance du dossier. Veuillez exposer votre démarche clinique."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
@@ -118,12 +162,9 @@ elif elapsed < DUREE_TOTALE:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
+    # Zone de saisie
     user_input = st.chat_input("Votre réponse...")
     if user_input:
-        # Vérification du temps au moment de l'envoi
-        if (time.time() - st.session_state.start_time) >= DUREE_TOTALE:
-            st.rerun()
-
         st.session_state.messages.append({"role": "user", "content": user_input})
         
         contents = []
@@ -145,11 +186,11 @@ elif elapsed < DUREE_TOTALE:
 
 # --- PHASE 3 : FIN DES 10 MINUTES ET ÉVALUATION ---
 else:
-    chrono_placeholder.error("Temps réglementaire de 10 minutes écoulé. L'épreuve est terminée.")
+    st.error("L'épreuve est terminée.")
 
-    # Génération du bilan évaluatif unique
+    # Génération du bilan évaluatif
     if not st.session_state.eval_generated:
-        with st.spinner("Génération du bilan évaluatif..."):
+        with st.spinner("Analyse de la performance et génération du bilan évaluatif..."):
             history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
             eval_prompt = f"Voici la transcription complète de l'oral de 8 minutes :\n\n{history_text}\n\n[TEMPS ÉCOULÉ] Rédige le bilan évaluatif en appliquant strictement les consignes (Satisfaisant / En cours d'acquisition / Insuffisant) sans dévoiler la pondération chiffrée."
             
