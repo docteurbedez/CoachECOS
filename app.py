@@ -6,29 +6,14 @@ from google import genai
 from google.genai import types
 
 # -----------------------------------------------------------------------------
-# 1. PARAMÉTRAGE DU SUJET, BARÈME ET MODE D'ÉVALUATION
+# 1. PARAMÉTRAGE DU SUJET, BARÈME ET MODE D'ÉVALUATION v6
 # -----------------------------------------------------------------------------
-# Bascule : False = "Sans patient standardisé" (Monologue) | True = Dialogue interactif
 MODE_DIALOGUE = False 
 
-SUJET_ETUDIANT = """
-### CONSIGNES ET INFORMATIONS PATIENT (2 minutes de lecture) v6
-
-**Patient :** M. X, 48 ans.
-**Motif de consultation :** Douleur pulsatile au niveau du secteur 2 depuis 48h, exacerbée au chaud.
-**Antécédents :** Tabagisme (15 paquets/an), hypertension artérielle traitée sous IEC.
-**Données cliniques :** Restauration volumineuse en résine composite sur 26, test au froid négatif, percussion axiale très douloureuse. Pas d'adénopathie palpable, état général conservé.
-
-*Prenez connaissance de ces éléments. L'échange débutera automatiquement à la fin du compte à rebours de lecture.*
-"""
-
-BAREME_SECRET = """
-ÉLÉMENTS ATTENDUS ET PONDÉRATION STRICTE (CONFIDENTIEL - NE PAS DIVULGUER AUX ÉTUDIANTS) :
-1. Hypothèse diagnostique principale : Nécrose pulpaire compliquée d'une parodontite apicale aiguë sur 26 (Pondération : 30%).
-2. Examens complémentaires indiqués : Cliché rétro-alvéolaire centré sur 26 (Pondération : 20%).
-3. Prise en charge d'urgence : Traitement endodontique (ouverture de chambre, parage canalaire) sous anesthésie locale + prescription antalgique adaptée (Pondération : 35%).
-4. Gestion des risques et communication : Prise en compte de l'hypertension pour l'anesthésie (vasoconstricteur adapté), clarté de l'information donnée au patient (Pondération : 15%).
-"""
+# Les textes sont récupérés de manière sécurisée depuis les secrets Streamlit
+# Ils ne sont plus écrits en dur dans ce fichier
+SUJET_ETUDIANT = st.secrets["SUJET_ETUDIANT"]
+BAREME_SECRET = st.secrets["BAREME_SECRET"]
 
 DUREE_LECTURE = 120    # 2 minutes = 120 s
 DUREE_ECHANGE = 480    # 8 minutes = 480 s
