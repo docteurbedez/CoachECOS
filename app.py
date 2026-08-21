@@ -6,15 +6,24 @@ from google import genai
 from google.genai import types
 
 # -----------------------------------------------------------------------------
-# 1. PARAMÉTRAGE DU SUJET, BARÈME ET MODE D'ÉVALUATION v8
+# 1. PARAMÉTRAGE DYNAMIQUE DU CAS (1 À 8) VIA L'URL
 # -----------------------------------------------------------------------------
 
-# Les textes et le mode sont récupérés de manière sécurisée depuis les secrets Streamlit
-SUJET_ETUDIANT = st.secrets["SUJET_ETUDIANT"]
-BAREME_SECRET = st.secrets["BAREME_SECRET"]
+# Récupération du paramètre "cas" dans l'URL (par défaut : "1")
+id_cas = str(st.query_params.get("cas", "1")).strip()
 
-# Récupération du mode (par défaut à False si la ligne est oubliée dans les secrets)
-MODE_DIALOGUE = st.secrets.get("MODE_INTERACTIF", False)
+# Liste des identifiants valides
+CAS_VALIDES = [str(i) for i in range(1, 9)]
+
+if id_cas not in CAS_VALIDES or id_cas not in st.secrets:
+    st.error(f"Erreur : Le dossier clinique '{id_cas}' n'existe pas ou n'est pas configuré. Veuillez utiliser un numéro de 1 à 8 valide.")
+    st.stop()
+
+# Chargement des paramètres du cas sélectionné
+cas_data = st.secrets[id_cas]
+SUJET_ETUDIANT = cas_data["SUJET_ETUDIANT"]
+BAREME_SECRET = cas_data["BAREME_SECRET"]
+MODE_DIALOGUE = cas_data.get("MODE_INTERACTIF", False)
 
 DUREE_LECTURE = 120    # 2 minutes = 120 s
 DUREE_ECHANGE = 480    # 8 minutes = 480 s
@@ -31,7 +40,7 @@ POSTURE PENDANT L'ÉCHANGE (si mode interactif activé) :
 - Relance l'étudiant sur les points cliniques manquants.
 - Sois très concis (1 à 3 phrases).
 
-GRILLE ET BARÈME CONFIDENTIEL :
+GRILLE ET BARÈME CONFIDENTIEL DU CAS CLINIQUE :
 {BAREME_SECRET}
 
 INSTRUCTIONS POUR LE BILAN D'ÉVALUATION (déclenché à la fin des 10 minutes) :
@@ -48,8 +57,8 @@ POSTURE EN PHASE DE DÉBRIEFING (après l'évaluation) :
 - Refuse fermement de donner la pondération chiffrée.
 """
 
-st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
-st.title("Station d'évaluation standardisée")
+st.set_page_config(page_title=f"ECOS — Station {id_cas}", layout="centered")
+st.title(f"Station d'évaluation standardisée — Cas {id_cas}")
 
 # Initialisation de l'API
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
@@ -171,7 +180,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     with col1:
         components.html(js_code, height=50)
 
-    # Message initial automatique adapté au mode lu dans les secrets
+    # Message initial automatique adapté au mode
     if not st.session_state.messages:
         if MODE_DIALOGUE:
             premier_message = "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires."
@@ -190,7 +199,6 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
         st.session_state.messages.append({"role": "user", "content": user_input})
         
         if MODE_DIALOGUE:
-            # Mode Interactif : on interroge l'API à chaque message
             contents = []
             for m in st.session_state.messages:
                 r = "model" if m["role"] == "assistant" else "user"
@@ -206,7 +214,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             except Exception as e:
                 st.error(f"Erreur API : {str(e)}")
         else:
-            # Mode Sans patient (Exposé) : on n'appelle pas l'API, on laisse le champ libre à l'étudiant
+            # Mode Exposé (sans patient standardisé) : pas d'appel API intermédiaire
             pass
             
         st.rerun()
@@ -215,7 +223,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
 else:
     st.error("L'épreuve est terminée.")
 
-    # Génération du bilan évaluatif global
+    # Synthèse évaluative
     if not st.session_state.eval_generated:
         with st.spinner("Analyse de la performance et génération du bilan évaluatif..."):
             history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
