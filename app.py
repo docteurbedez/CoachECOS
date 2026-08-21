@@ -6,14 +6,15 @@ from google import genai
 from google.genai import types
 
 # -----------------------------------------------------------------------------
-# 1. PARAMÉTRAGE DU SUJET, BARÈME ET MODE D'ÉVALUATION v6
+# 1. PARAMÉTRAGE DU SUJET, BARÈME ET MODE D'ÉVALUATION v8
 # -----------------------------------------------------------------------------
-MODE_DIALOGUE = False 
 
-# Les textes sont récupérés de manière sécurisée depuis les secrets Streamlit
-# Ils ne sont plus écrits en dur dans ce fichier
+# Les textes et le mode sont récupérés de manière sécurisée depuis les secrets Streamlit
 SUJET_ETUDIANT = st.secrets["SUJET_ETUDIANT"]
 BAREME_SECRET = st.secrets["BAREME_SECRET"]
+
+# Récupération du mode (par défaut à False si la ligne est oubliée dans les secrets)
+MODE_DIALOGUE = st.secrets.get("MODE_INTERACTIF", False)
 
 DUREE_LECTURE = 120    # 2 minutes = 120 s
 DUREE_ECHANGE = 480    # 8 minutes = 480 s
@@ -66,7 +67,8 @@ if "force_end" not in st.session_state:
 
 # Écran de démarrage
 if st.session_state.start_time is None:
-    st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'exposé.")
+    st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'exposé ou de dialogue.")
+    
     if st.button("Démarrer la station (10 minutes)"):
         st.session_state.start_time = time.time()
         st.rerun()
@@ -169,10 +171,10 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     with col1:
         components.html(js_code, height=50)
 
-    # Message initial automatique adapté au mode
+    # Message initial automatique adapté au mode lu dans les secrets
     if not st.session_state.messages:
         if MODE_DIALOGUE:
-            premier_message = "Bonjour. Vous pouvez démarrer."
+            premier_message = "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires."
         else:
             premier_message = "Bonjour. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
