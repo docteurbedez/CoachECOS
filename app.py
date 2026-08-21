@@ -172,9 +172,9 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     # Message initial automatique adapté au mode
     if not st.session_state.messages:
         if MODE_DIALOGUE:
-            premier_message = "Bonjour. Vous avez pris connaissance du dossier. Veuillez exposer votre démarche clinique."
+            premier_message = "Bonjour. Vous pouvez démarrer."
         else:
-            premier_message = "Bonjour. Vous avez pris connaissance du dossier. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
+            premier_message = "Bonjour. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
 
     # Affichage de l'historique
@@ -238,7 +238,7 @@ else:
             st.markdown(msg["content"])
 
     # Questions post-évaluation
-    post_eval_input = st.chat_input("Posez vos questions sur le débriefing clinique...")
+    post_eval_input = st.chat_input("Posez vos questions sur le débriefing de l'épreuve...")
     if post_eval_input:
         st.session_state.messages.append({"role": "user", "content": post_eval_input})
         
