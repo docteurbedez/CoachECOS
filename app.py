@@ -5,22 +5,58 @@ import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
 
+st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
+
 # -----------------------------------------------------------------------------
-# 1. PARAMÉTRAGE DYNAMIQUE DU CAS (1 À 8) VIA L'URL
+# 1. DÉTECTION ET SÉLECTION DU CAS CLINIQUE (1 À 8)
 # -----------------------------------------------------------------------------
 
-# Récupération du paramètre "cas" dans l'URL (par défaut : "1")
-id_cas = str(st.query_params.get("cas", "1")).strip()
+# Détection des cas configurés dans les secrets parmi les numéros 1 à 8
+CAS_DISPONIBLES = [str(i) for i in range(1, 9) if str(i) in st.secrets]
 
-# Liste des identifiants valides
-CAS_VALIDES = [str(i) for i in range(1, 9)]
-
-if id_cas not in CAS_VALIDES or id_cas not in st.secrets:
-    st.error(f"Erreur : Le dossier clinique '{id_cas}' n'existe pas ou n'est pas configuré. Veuillez utiliser un numéro de 1 à 8 valide.")
+if not CAS_DISPONIBLES:
+    st.error("Erreur : Aucun cas clinique (de '1' à '8') n'a été trouvé dans les Secrets de Streamlit.")
     st.stop()
 
-# Chargement des paramètres du cas sélectionné
+# Initialisation de l'état de session
+if "start_time" not in st.session_state:
+    st.session_state.start_time = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "eval_generated" not in st.session_state:
+    st.session_state.eval_generated = False
+if "force_end" not in st.session_state:
+    st.session_state.force_end = False
+if "selected_cas" not in st.session_state:
+    # Pré-sélection via l'URL si valide, sinon premier cas disponible
+    url_param = str(st.query_params.get("cas", "")).strip()
+    st.session_state.selected_cas = url_param if url_param in CAS_DISPONIBLES else CAS_DISPONIBLES[0]
+
+# --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
+if st.session_state.start_time is None:
+    st.title("Station d'évaluation standardisée")
+    st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'oral.")
+
+    index_default = CAS_DISPONIBLES.index(st.session_state.selected_cas)
+    choix = st.selectbox(
+        "Sélectionnez le cas clinique :",
+        options=CAS_DISPONIBLES,
+        index=index_default,
+        format_func=lambda x: f"Cas clinique n° {x}"
+    )
+
+    if st.button("Démarrer la station (10 minutes)"):
+        st.session_state.selected_cas = choix
+        st.session_state.start_time = time.time()
+        st.rerun()
+    st.stop()
+
+# -----------------------------------------------------------------------------
+# 2. CHARGEMENT DU CAS SÉLECTIONNÉ ET CONFIGURATION
+# -----------------------------------------------------------------------------
+id_cas = st.session_state.selected_cas
 cas_data = st.secrets[id_cas]
+
 SUJET_ETUDIANT = cas_data["SUJET_ETUDIANT"]
 BAREME_SECRET = cas_data["BAREME_SECRET"]
 MODE_DIALOGUE = cas_data.get("MODE_INTERACTIF", False)
@@ -57,31 +93,11 @@ POSTURE EN PHASE DE DÉBRIEFING (après l'évaluation) :
 - Refuse fermement de donner la pondération chiffrée.
 """
 
-st.set_page_config(page_title=f"ECOS — Station {id_cas}", layout="centered")
 st.title(f"Station d'évaluation standardisée — Cas {id_cas}")
 
 # Initialisation de l'API
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
 client = genai.Client(api_key=api_key)
-
-# Gestion de l'état de session
-if "start_time" not in st.session_state:
-    st.session_state.start_time = None
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "eval_generated" not in st.session_state:
-    st.session_state.eval_generated = False
-if "force_end" not in st.session_state:
-    st.session_state.force_end = False
-
-# Écran de démarrage
-if st.session_state.start_time is None:
-    st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'exposé ou de dialogue.")
-    
-    if st.button("Démarrer la station (10 minutes)"):
-        st.session_state.start_time = time.time()
-        st.rerun()
-    st.stop()
 
 # Dossier patient affiché en haut
 with st.expander("Consignes et dossier patient", expanded=True):
@@ -172,7 +188,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             var mins = Math.floor(remaining / 60);
             var secs = remaining % 60;
             var form = (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
-            display.innerHTML = "⏱️ Phase d'exposé — " + form;
+            display.innerHTML = "⏱️ Phase d'oral — " + form;
         }}
     }}, 500);
     </script>
@@ -180,7 +196,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     with col1:
         components.html(js_code, height=50)
 
-    # Message initial automatique adapté au mode
+    # Message initial automatique
     if not st.session_state.messages:
         if MODE_DIALOGUE:
             premier_message = "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires."
@@ -214,7 +230,6 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             except Exception as e:
                 st.error(f"Erreur API : {str(e)}")
         else:
-            # Mode Exposé (sans patient standardisé) : pas d'appel API intermédiaire
             pass
             
         st.rerun()
