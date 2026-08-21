@@ -101,7 +101,7 @@ client = genai.Client(api_key=api_key)
 
 # Dossier patient affiché en haut
 with st.expander("Consignes et dossier patient", expanded=True):
-    st.markdown(SUJET_ETUDIANT)
+    st.markdown(SUJET_ETUDIANT, unsafe_allow_html=True)
 
 st.divider()
 
