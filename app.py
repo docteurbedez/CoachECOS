@@ -34,7 +34,7 @@ if "selected_cas" not in st.session_state:
 
 # --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
 if st.session_state.start_time is None:
-    st.title("Station d'évaluation standardisée")
+    st.title("Station d'ECOS")
     st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'oral.")
 
     index_default = CAS_DISPONIBLES.index(st.session_state.selected_cas)
@@ -93,7 +93,7 @@ POSTURE EN PHASE DE DÉBRIEFING (après l'évaluation) :
 - Refuse fermement de donner la pondération chiffrée.
 """
 
-st.title(f"Station d'évaluation standardisée — Cas {id_cas}")
+st.title(f"Station d'ECOS — Cas {id_cas}")
 
 # Initialisation de l'API
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
