@@ -61,20 +61,28 @@ SUJET_ETUDIANT = cas_data["SUJET_ETUDIANT"]
 BAREME_SECRET = cas_data["BAREME_SECRET"]
 MODE_DIALOGUE = cas_data.get("MODE_INTERACTIF", False)
 
-DUREE_LECTURE = 120    # 2 minutes = 120 s
-DUREE_ECHANGE = 480    # 8 minutes = 480 s
-DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
+# NOUVEAU : Récupération dynamique des rôles ou assignation par défaut
+MESSAGE_INITIAL = cas_data.get("MESSAGE_INITIAL", "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires.")
 
-MODEL_NAME = "gemini-3.5-flash-lite"
-
-SYSTEM_INSTRUCTION_ORAL = f"""
-Tu es un examinateur neutre et rigoureux pour une station d'examen clinique objectif structuré (ECOS) de 8 minutes.
+ROLE_PAR_DEFAUT = """Tu es un examinateur neutre et rigoureux pour une station d'examen clinique objectif structuré (ECOS) de 8 minutes.
 
 POSTURE PENDANT L'ÉCHANGE :
 - Reste strictement neutre, sobre et professionnel.
 - Ne formule aucun encouragement, compliment, ni formule de politesse superflue.
 - Relance l'étudiant sur les points cliniques manquants ou demande des précisions.
-- Sois très concis (1 à 3 phrases maximum).
+- Sois très concis (1 à 3 phrases maximum)."""
+
+ROLE_IA_ACTUEL = cas_data.get("ROLE_IA", ROLE_PAR_DEFAUT)
+
+DUREE_LECTURE = 120    # 2 minutes = 120 s
+DUREE_ECHANGE = 480    # 8 minutes = 480 s
+DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
+
+MODEL_NAME = "gemini-2.5-flash"
+
+SYSTEM_INSTRUCTION_ORAL = f"""
+{ROLE_IA_ACTUEL}
+
 - INTERDICTION ABSOLUE : Ne donne jamais d'évaluation, de note, de feedback global ou de conclusion. L'épreuve est gérée par un chronomètre externe et continue tant que le temps n'est pas écoulé.
 """
 
@@ -201,7 +209,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     # Message initial automatique
     if not st.session_state.messages:
         if MODE_DIALOGUE:
-            premier_message = "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires."
+            premier_message = MESSAGE_INITIAL
         else:
             premier_message = "Bonjour. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
