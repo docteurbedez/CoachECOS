@@ -223,7 +223,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
                 contents.append(types.Content(role=r, parts=[types.Part.from_text(text=m["content"])]))
 
             try:
-                    response = client.models.generate_content(
+                response = client.models.generate_content(
                     model=MODEL_NAME,
                     contents=contents,
                     config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION_ORAL)
