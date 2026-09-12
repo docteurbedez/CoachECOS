@@ -65,7 +65,7 @@ DUREE_LECTURE = 120    # 2 minutes = 120 s
 DUREE_ECHANGE = 480    # 8 minutes = 480 s
 DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
 
-MODEL_NAME = "gemini-3.6-flash"
+MODEL_NAME = "gemini-2.5-flash"
 
 SYSTEM_INSTRUCTION = f"""
 Tu es un examinateur neutre et rigoureux pour une station d'examen clinique objectif structuré (ECOS) de 8 minutes.
