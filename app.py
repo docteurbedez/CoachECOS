@@ -67,19 +67,24 @@ DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
 
 MODEL_NAME = "gemini-3.5-flash-lite"
 
-SYSTEM_INSTRUCTION = f"""
+SYSTEM_INSTRUCTION_ORAL = f"""
 Tu es un examinateur neutre et rigoureux pour une station d'examen clinique objectif structuré (ECOS) de 8 minutes.
 
-POSTURE PENDANT L'ÉCHANGE (si mode interactif activé) :
+POSTURE PENDANT L'ÉCHANGE :
 - Reste strictement neutre, sobre et professionnel.
 - Ne formule aucun encouragement, compliment, ni formule de politesse superflue.
-- Relance l'étudiant sur les points cliniques manquants.
-- Sois très concis (1 à 3 phrases).
+- Relance l'étudiant sur les points cliniques manquants ou demande des précisions.
+- Sois très concis (1 à 3 phrases maximum).
+- INTERDICTION ABSOLUE : Ne donne jamais d'évaluation, de note, de feedback global ou de conclusion. L'épreuve est gérée par un chronomètre externe et continue tant que le temps n'est pas écoulé.
+"""
+
+SYSTEM_INSTRUCTION_EVAL = f"""
+Tu es le jury d'évaluation pour une station d'ECOS.
 
 GRILLE ET BARÈME CONFIDENTIEL DU CAS CLINIQUE :
 {BAREME_SECRET}
 
-INSTRUCTIONS POUR LE BILAN D'ÉVALUATION (déclenché à la fin des 10 minutes) :
+CONSIGNES DU BILAN D'ÉVALUATION :
 - Calcule la note globale selon le barème secret, basée sur l'ensemble de l'exposé de l'étudiant.
 - Classe impérativement la performance dans l'une des 3 catégories suivantes :
   * « Satisfaisant » (note > 70%)
@@ -87,10 +92,7 @@ INSTRUCTIONS POUR LE BILAN D'ÉVALUATION (déclenché à la fin des 10 minutes) 
   * « Insuffisant » (note < 50%)
 - Détaille les points cliniques validés, les erreurs commises et les omissions majeures.
 - RÈGLE ABSOLUE DE CONFIDENTIALITÉ : Tu ne dois JAMAIS divulguer les pourcentages, les points précis du barème ou la pondération exacte des critères, même lors du débriefing.
-
-POSTURE EN PHASE DE DÉBRIEFING (après l'évaluation) :
-- Réponds aux questions de l'étudiant sur le raisonnement clinique.
-- Refuse fermement de donner la pondération chiffrée.
+- POSTURE EN DÉBRIEFING : Réponds aux questions sur le raisonnement clinique en refusant fermement de donner la pondération chiffrée.
 """
 
 st.title(f"Station d'ECOS — Cas {id_cas}")
@@ -221,10 +223,10 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
                 contents.append(types.Content(role=r, parts=[types.Part.from_text(text=m["content"])]))
 
             try:
-                response = client.models.generate_content(
+                    response = client.models.generate_content(
                     model=MODEL_NAME,
                     contents=contents,
-                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION_ORAL)
                 )
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
             except Exception as e:
@@ -248,7 +250,7 @@ else:
                 response = client.models.generate_content(
                     model=MODEL_NAME,
                     contents=eval_prompt,
-                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION_EVAL)
                 )
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 st.session_state.eval_generated = True
@@ -276,7 +278,7 @@ else:
             response = client.models.generate_content(
                 model=MODEL_NAME,
                 contents=contents,
-                config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION_EVAL)
             )
             st.session_state.messages.append({"role": "assistant", "content": response.text})
         except Exception as e:
