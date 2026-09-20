@@ -65,7 +65,6 @@ cas_data = st.secrets[id_cas]
 SUJET_ETUDIANT = cas_data["SUJET_ETUDIANT"]
 BAREME_SECRET = cas_data["BAREME_SECRET"]
 MODE_DIALOGUE = cas_data.get("MODE_INTERACTIF", False)
-# LIGNE AJOUTÉE ICI POUR RÉCUPÉRER L'URL DU MODÈLE 3D
 URL_MODELE_3D = cas_data.get("URL_MODELE_3D", None)
 
 MESSAGE_INITIAL = cas_data.get("MESSAGE_INITIAL", "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires.")
@@ -119,23 +118,98 @@ client = genai.Client(api_key=api_key)
 with st.expander("Consignes et dossier patient", expanded=True):
     st.markdown(SUJET_ETUDIANT, unsafe_allow_html=True)
     
-    # --- BLOC AJOUTÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
+    # --- BLOC MODIFIÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
     if URL_MODELE_3D:
-        st.write("---")
-        st.caption("🔍 **Modèle 3D interactif :** Cliquez-glissez pour pivoter, molette/pincement pour zoomer.")
         html_3d = f"""
-        <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"></script>
-        <model-viewer 
-            src="{URL_MODELE_3D}" 
-            alt="Modèle 3D clinique" 
-            camera-controls 
-            auto-rotate
-            rotation-per-second="20deg"
-            shadow-intensity="1"
-            style="width: 100%; height: 420px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-        </model-viewer>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+            <style>
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                }}
+                details {{
+                    border: 1px solid #e0e0e0;
+                    border-radius: 8px;
+                    padding: 10px 14px;
+                    background: #ffffff;
+                    margin-top: 10px;
+                }}
+                summary {{
+                    font-weight: 600;
+                    cursor: pointer;
+                    color: #1f2937;
+                    outline: none;
+                }}
+                .viewer-container {{
+                    position: relative;
+                    margin-top: 12px;
+                    width: 100%;
+                    height: 420px;
+                }}
+                model-viewer {{
+                    width: 100%;
+                    height: 100%;
+                    background-color: #f8f9fa;
+                    border-radius: 6px;
+                    border: 1px solid #dee2e6;
+                }}
+                .reset-btn {{
+                    position: absolute;
+                    bottom: 12px;
+                    right: 12px;
+                    background-color: #ffffff;
+                    color: #333333;
+                    border: 1px solid #cccccc;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    font-size: 13px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    transition: all 0.2s ease;
+                }}
+                .reset-btn:hover {{
+                    background-color: #f1f1f1;
+                    border-color: #999999;
+                }}
+            </style>
+        </head>
+        <body>
+            <details open>
+                <summary>🦷 <b>Modèle 3D interactif :</b></summary>
+                <p style="font-size: 13px; color: #6b7280; margin: 8px 0;">
+                    <i>Cliquez-glissez pour manipuler la dent (rotation, inclinaison). Utilisez la molette ou le pincement pour zoomer.</i>
+                </p>
+                <div class="viewer-container">
+                    <model-viewer 
+                        id="dent-viewer"
+                        src="{URL_MODELE_3D}" 
+                        alt="Modèle 3D dentaire" 
+                        camera-controls 
+                        shadow-intensity="1">
+                    </model-viewer>
+                    <button class="reset-btn" id="btn-reset">🔄 Réinitialiser la vue</button>
+                </div>
+            </details>
+
+            <script>
+                const viewer = document.getElementById('dent-viewer');
+                const resetBtn = document.getElementById('btn-reset');
+                
+                resetBtn.addEventListener('click', () => {{
+                    viewer.cameraOrbit = '0deg 75deg 105%';
+                    viewer.cameraTarget = 'auto auto auto';
+                    viewer.fieldOfView = 'auto';
+                }});
+            </script>
+        </body>
+        </html>
         """
-        components.html(html_3d, height=440)
+        components.html(html_3d, height=510)
     # -----------------------------------------------------------
 
 st.divider()
