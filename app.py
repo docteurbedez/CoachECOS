@@ -208,18 +208,6 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     with col1:
         components.html(js_code, height=50)
 
-    # --- PLACEMENT FIXE DU BOUTON VOCAL EN HAUT ---
-    st.write("---")
-    col_vocal, col_vide = st.columns([2, 1])
-    with col_vocal:
-        audio_dict_2 = mic_recorder(
-            start_prompt="🎙️ Enregistrer la voix",
-            stop_prompt="⏹️ Arrêter et envoyer",
-            key="mic_phase2"
-        )
-    st.caption("*(Autorisez le micro lors du 1er clic. Le bouton restera toujours visible ici)*")
-    st.divider()
-
     # Message initial automatique
     if not st.session_state.messages:
         if MODE_DIALOGUE:
@@ -228,42 +216,55 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             premier_message = "Bonjour. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
 
-    # Affichage de l'historique
+    # --- 1. AFFICHAGE DE L'HISTORIQUE (EN PREMIER) ---
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Champ de texte classique en bas
+    # --- 2. BOUTON VOCAL EN BAS ---
+    st.write("") 
+    col_vocal, col_vide = st.columns([1, 1])
+    with col_vocal:
+        audio_dict_2 = mic_recorder(
+            start_prompt="🎙️ Enregistrer la voix",
+            stop_prompt="⏹️ Arrêter et envoyer",
+            key="mic_phase2"
+        )
+
     text_input = st.chat_input("Votre réponse par écrit...")
 
-    # --- LOGIQUE DE TRAITEMENT DE L'ENTRÉE (VOIX OU TEXTE) ---
+    # --- 3. LOGIQUE DE TRANSCRIPTION STRICTE ---
     user_input = None
-    
-    # 1. On vérifie si un nouvel audio a été enregistré via un hash de l'audio
     audio_id_2 = hash(audio_dict_2["bytes"]) if audio_dict_2 else None
     
     if audio_dict_2 and audio_id_2 != st.session_state.last_audio_id_2:
-        # C'est un nouvel enregistrement ! On met à jour l'ID
         st.session_state.last_audio_id_2 = audio_id_2
         
-        with st.spinner("Transcription de votre voix par l'IA..."):
+        with st.spinner("Transcription de votre voix..."):
             audio_bytes = audio_dict_2["bytes"]
             audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/webm")
             
+            prompt_transcription = """Transcris exactement ce qui est dit dans cet enregistrement audio.
+            CONSIGNES STRICTES :
+            1. Ne génère que le texte prononcé, mot pour mot.
+            2. N'inclus JAMAIS d'horodatage ou de timecode (comme 00:01).
+            3. Ne décris pas les bruits de fond ni les silences.
+            4. Si tu n'entends absolument aucune voix humaine, réponds UNIQUEMENT par le mot : [AUDIO_VIDE]"""
+            
             try:
-                # On demande à Gemini de faire uniquement de la transcription
                 transcription_response = client.models.generate_content(
                     model=MODEL_NAME,
-                    contents=[
-                        audio_part, 
-                        "Transcris exactement cet enregistrement vocal en français. Ne réponds pas à l'audio, écris uniquement ce qui est dit, sans commentaires."
-                    ]
+                    contents=[audio_part, prompt_transcription]
                 )
-                user_input = transcription_response.text
+                resultat_brut = transcription_response.text.strip()
+                
+                if "[AUDIO_VIDE]" in resultat_brut or "00:01" in resultat_brut:
+                    st.warning("⚠️ Aucune voix détectée. Assurez-vous d'avoir autorisé le micro et parlez fort après avoir cliqué.")
+                else:
+                    user_input = resultat_brut
             except Exception as e:
                 st.error(f"Erreur de transcription audio : {str(e)}")
                 
-    # 2. Sinon, on vérifie si l'utilisateur a tapé du texte
     elif text_input:
         user_input = text_input
 
@@ -293,7 +294,6 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
 else:
     st.error("L'épreuve est terminée.")
 
-    # Synthèse évaluative
     if not st.session_state.eval_generated:
         with st.spinner("Analyse de la performance et génération du bilan évaluatif..."):
             history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
@@ -312,26 +312,22 @@ else:
                 
         st.rerun()
 
-    # Bouton vocal pour la phase de débriefing
-    st.write("---")
-    col_vocal_3, col_vide_3 = st.columns([2, 1])
+    # Affichage du fil complet avec l'évaluation (EN PREMIER)
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Bouton vocal en bas pour le débriefing
+    col_vocal_3, col_vide_3 = st.columns([1, 1])
     with col_vocal_3:
         audio_dict_3 = mic_recorder(
             start_prompt="🎙️ Poser une question à l'oral",
             stop_prompt="⏹️ Arrêter et envoyer",
             key="mic_phase3"
         )
-    st.divider()
-
-    # Affichage du fil complet avec l'évaluation
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # Champ texte pour la phase de débriefing
+        
     post_eval_text = st.chat_input("Posez vos questions sur le débriefing de l'épreuve...")
 
-    # Logique de traitement de la question de débriefing
     post_eval_input = None
     audio_id_3 = hash(audio_dict_3["bytes"]) if audio_dict_3 else None
 
@@ -340,18 +336,29 @@ else:
         with st.spinner("Transcription de votre question..."):
             audio_bytes = audio_dict_3["bytes"]
             audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/webm")
+            
+            prompt_transcription = """Transcris exactement ce qui est dit dans cet enregistrement audio.
+            CONSIGNES STRICTES :
+            1. Ne génère que le texte prononcé, mot pour mot.
+            2. N'inclus JAMAIS d'horodatage ou de timecode (comme 00:01).
+            3. Ne décris pas les bruits de fond ni les silences.
+            4. Si tu n'entends absolument aucune voix humaine, réponds UNIQUEMENT par le mot : [AUDIO_VIDE]"""
+            
             try:
                 transcription_response = client.models.generate_content(
                     model=MODEL_NAME,
-                    contents=[audio_part, "Transcris exactement cet enregistrement vocal en français. N'ajoute aucun commentaire."]
+                    contents=[audio_part, prompt_transcription]
                 )
-                post_eval_input = transcription_response.text
+                resultat_brut = transcription_response.text.strip()
+                if "[AUDIO_VIDE]" not in resultat_brut and "00:01" not in resultat_brut:
+                    post_eval_input = resultat_brut
+                else:
+                    st.warning("⚠️ Aucune voix détectée.")
             except Exception as e:
                 st.error(f"Erreur de transcription audio : {str(e)}")
     elif post_eval_text:
         post_eval_input = post_eval_text
 
-    # Envoi de la question
     if post_eval_input:
         st.session_state.messages.append({"role": "user", "content": post_eval_input})
         
