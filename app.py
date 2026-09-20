@@ -118,7 +118,7 @@ client = genai.Client(api_key=api_key)
 with st.expander("Consignes et dossier patient", expanded=True):
     st.markdown(SUJET_ETUDIANT, unsafe_allow_html=True)
     
-    # --- BLOC MODIFIÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
+# --- BLOC MODIFIÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
     if URL_MODELE_3D:
         html_3d = f"""
         <!DOCTYPE html>
@@ -149,18 +149,29 @@ with st.expander("Consignes et dossier patient", expanded=True):
                     margin-top: 12px;
                     width: 100%;
                     height: 420px;
+                    background-color: #f8f9fa;
+                    border-radius: 6px;
+                    border: 1px solid #dee2e6;
+                    overflow: hidden;
+                }}
+                .viewer-container:fullscreen {{
+                    border: none;
+                    border-radius: 0;
                 }}
                 model-viewer {{
                     width: 100%;
                     height: 100%;
-                    background-color: #f8f9fa;
-                    border-radius: 6px;
-                    border: 1px solid #dee2e6;
+                    outline: none;
                 }}
-                .reset-btn {{
+                .btn-container {{
                     position: absolute;
                     bottom: 12px;
                     right: 12px;
+                    display: flex;
+                    gap: 8px;
+                    z-index: 10;
+                }}
+                .viewer-btn {{
                     background-color: #ffffff;
                     color: #333333;
                     border: 1px solid #cccccc;
@@ -172,7 +183,7 @@ with st.expander("Consignes et dossier patient", expanded=True):
                     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                     transition: all 0.2s ease;
                 }}
-                .reset-btn:hover {{
+                .viewer-btn:hover {{
                     background-color: #f1f1f1;
                     border-color: #999999;
                 }}
@@ -182,9 +193,9 @@ with st.expander("Consignes et dossier patient", expanded=True):
             <details open>
                 <summary>🦷 <b>Modèle 3D interactif :</b></summary>
                 <p style="font-size: 13px; color: #6b7280; margin: 8px 0;">
-                    <i>Cliquez-glissez pour manipuler la dent (rotation, inclinaison). Utilisez la molette ou le pincement pour zoomer.</i>
+                    <i>Cliquez-glissez pour manipuler la dent. Utilisez la molette pour zoomer.</i>
                 </p>
-                <div class="viewer-container">
+                <div class="viewer-container" id="fs-container">
                     <model-viewer 
                         id="dent-viewer"
                         src="{URL_MODELE_3D}" 
@@ -192,18 +203,50 @@ with st.expander("Consignes et dossier patient", expanded=True):
                         camera-controls 
                         shadow-intensity="1">
                     </model-viewer>
-                    <button class="reset-btn" id="btn-reset">🔄 Réinitialiser la vue</button>
+                    <div class="btn-container">
+                        <button class="viewer-btn" id="btn-fullscreen">⛶ Plein écran</button>
+                        <button class="viewer-btn" id="btn-reset">🔄 Réinitialiser</button>
+                    </div>
                 </div>
             </details>
 
             <script>
                 const viewer = document.getElementById('dent-viewer');
                 const resetBtn = document.getElementById('btn-reset');
+                const fullscreenBtn = document.getElementById('btn-fullscreen');
+                const container = document.getElementById('fs-container');
                 
+                // Réinitialisation de la caméra
                 resetBtn.addEventListener('click', () => {{
                     viewer.cameraOrbit = '0deg 75deg 105%';
                     viewer.cameraTarget = 'auto auto auto';
                     viewer.fieldOfView = 'auto';
+                }});
+
+                // Gestion du mode plein écran
+                fullscreenBtn.addEventListener('click', () => {{
+                    if (!document.fullscreenElement) {{
+                        if (container.requestFullscreen) {{
+                            container.requestFullscreen();
+                        }} else if (container.webkitRequestFullscreen) {{ /* Safari */
+                            container.webkitRequestFullscreen();
+                        }}
+                    }} else {{
+                        if (document.exitFullscreen) {{
+                            document.exitFullscreen();
+                        }} else if (document.webkitExitFullscreen) {{
+                            document.webkitExitFullscreen();
+                        }}
+                    }}
+                }});
+                
+                // Mettre à jour le texte du bouton lors du changement d'état (Échap)
+                document.addEventListener('fullscreenchange', () => {{
+                    if (document.fullscreenElement) {{
+                        fullscreenBtn.innerHTML = '✖ Quitter plein écran';
+                    }} else {{
+                        fullscreenBtn.innerHTML = '⛶ Plein écran';
+                    }}
                 }});
             </script>
         </body>
