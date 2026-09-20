@@ -240,9 +240,16 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     if audio_dict_2 and audio_id_2 != st.session_state.last_audio_id_2:
         st.session_state.last_audio_id_2 = audio_id_2
         
+        audio_bytes = audio_dict_2["bytes"]
+        
+        # --- AJOUT DU LECTEUR AUDIO POUR DÉBOGAGE ---
+        st.info("Écoutez l'enregistrement ci-dessous : si vous n'entendez rien, le problème vient de votre micro/navigateur.")
+        st.audio(audio_bytes)
+        # -------------------------------------------
+
         with st.spinner("Transcription de votre voix..."):
-            audio_bytes = audio_dict_2["bytes"]
-            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/webm")
+            # On force le mime_type en wav pour faciliter la lecture par Gemini
+            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
             
             prompt_transcription = """Transcris exactement ce qui est dit dans cet enregistrement audio.
             CONSIGNES STRICTES :
@@ -259,7 +266,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
                 resultat_brut = transcription_response.text.strip()
                 
                 if "[AUDIO_VIDE]" in resultat_brut or "00:01" in resultat_brut:
-                    st.warning("⚠️ Aucune voix détectée. Assurez-vous d'avoir autorisé le micro et parlez fort après avoir cliqué.")
+                    st.warning("⚠️ L'IA n'a détecté aucune voix dans ce fichier audio.")
                 else:
                     user_input = resultat_brut
             except Exception as e:
@@ -333,9 +340,16 @@ else:
 
     if audio_dict_3 and audio_id_3 != st.session_state.last_audio_id_3:
         st.session_state.last_audio_id_3 = audio_id_3
+        
+        audio_bytes = audio_dict_3["bytes"]
+        
+        # --- AJOUT DU LECTEUR AUDIO POUR DÉBOGAGE ---
+        st.info("Écoutez l'enregistrement ci-dessous : si vous n'entendez rien, le problème vient de votre micro/navigateur.")
+        st.audio(audio_bytes)
+        # -------------------------------------------
+
         with st.spinner("Transcription de votre question..."):
-            audio_bytes = audio_dict_3["bytes"]
-            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/webm")
+            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
             
             prompt_transcription = """Transcris exactement ce qui est dit dans cet enregistrement audio.
             CONSIGNES STRICTES :
@@ -353,7 +367,7 @@ else:
                 if "[AUDIO_VIDE]" not in resultat_brut and "00:01" not in resultat_brut:
                     post_eval_input = resultat_brut
                 else:
-                    st.warning("⚠️ Aucune voix détectée.")
+                    st.warning("⚠️ L'IA n'a détecté aucune voix dans ce fichier audio.")
             except Exception as e:
                 st.error(f"Erreur de transcription audio : {str(e)}")
     elif post_eval_text:
