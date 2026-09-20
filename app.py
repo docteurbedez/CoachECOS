@@ -65,6 +65,8 @@ cas_data = st.secrets[id_cas]
 SUJET_ETUDIANT = cas_data["SUJET_ETUDIANT"]
 BAREME_SECRET = cas_data["BAREME_SECRET"]
 MODE_DIALOGUE = cas_data.get("MODE_INTERACTIF", False)
+# LIGNE AJOUTÉE ICI POUR RÉCUPÉRER L'URL DU MODÈLE 3D
+URL_MODELE_3D = cas_data.get("URL_MODELE_3D", None)
 
 MESSAGE_INITIAL = cas_data.get("MESSAGE_INITIAL", "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires.")
 
@@ -116,6 +118,25 @@ client = genai.Client(api_key=api_key)
 # Dossier patient affiché en haut
 with st.expander("Consignes et dossier patient", expanded=True):
     st.markdown(SUJET_ETUDIANT, unsafe_allow_html=True)
+    
+    # --- BLOC AJOUTÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
+    if URL_MODELE_3D:
+        st.write("---")
+        st.caption("🔍 **Modèle 3D interactif :** Cliquez-glissez pour pivoter, molette/pincement pour zoomer.")
+        html_3d = f"""
+        <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"></script>
+        <model-viewer 
+            src="{URL_MODELE_3D}" 
+            alt="Modèle 3D clinique" 
+            camera-controls 
+            auto-rotate
+            rotation-per-second="20deg"
+            shadow-intensity="1"
+            style="width: 100%; height: 420px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+        </model-viewer>
+        """
+        components.html(html_3d, height=440)
+    # -----------------------------------------------------------
 
 st.divider()
 
