@@ -167,8 +167,24 @@ if elapsed < DUREE_LECTURE and not st.session_state.force_end:
 elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     tps_restant = int(DUREE_TOTALE - elapsed)
     
-    col1, col2 = st.columns([3, 1])
-    with col2:
+    # Message initial automatique
+    if not st.session_state.messages:
+        if MODE_DIALOGUE:
+            premier_message = MESSAGE_INITIAL
+        else:
+            premier_message = "Bonjour. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
+        st.session_state.messages.append({"role": "assistant", "content": premier_message})
+
+    # --- 1. AFFICHAGE DE L'HISTORIQUE (EN PREMIER) ---
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    st.write("---")
+
+    # --- 2. CHRONOMÈTRE GLOBAL ET BOUTON CLÔTURE (DÉPLACÉS EN BAS) ---
+    col_chrono, col_cloture = st.columns([3, 1])
+    with col_cloture:
         if st.button("Clôturer l'épreuve", use_container_width=True):
             st.session_state.force_end = True
             st.rerun()
@@ -207,23 +223,10 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     }}, 500);
     </script>
     """
-    with col1:
+    with col_chrono:
         components.html(js_code, height=50)
 
-    # Message initial automatique
-    if not st.session_state.messages:
-        if MODE_DIALOGUE:
-            premier_message = MESSAGE_INITIAL
-        else:
-            premier_message = "Bonjour. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
-        st.session_state.messages.append({"role": "assistant", "content": premier_message})
-
-    # --- 1. AFFICHAGE DE L'HISTORIQUE (EN PREMIER) ---
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # --- 2. BOUTON VOCAL ET AIDE EN BAS ---
+    # --- 3. BOUTON VOCAL ET AIDE (EN BAS) ---
     st.write("") 
     col_vocal, col_help, col_vide = st.columns([1.5, 1.5, 1])
     with col_vocal:
@@ -245,7 +248,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
 
     text_input = st.chat_input("Votre réponse par écrit...")
 
-    # --- 3. LOGIQUE DE TRANSCRIPTION STRICTE ---
+    # --- 4. LOGIQUE DE TRANSCRIPTION STRICTE ---
     user_input = None
     audio_id_2 = hash(audio_dict_2["bytes"]) if audio_dict_2 else None
     
@@ -329,6 +332,8 @@ else:
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+
+    st.write("---")
 
     # Bouton vocal et aide en bas pour le débriefing
     col_vocal_3, col_help_3, col_vide_3 = st.columns([1.5, 1.5, 1])
