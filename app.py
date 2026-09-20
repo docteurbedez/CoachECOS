@@ -4,6 +4,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
+from streamlit_mic_recorder import speech_to_text
 
 st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 
@@ -11,7 +12,6 @@ st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 # 1. DÉTECTION ET SÉLECTION DU CAS CLINIQUE (1 À 8)
 # -----------------------------------------------------------------------------
 
-# Détection des cas configurés dans les secrets parmi les numéros 1 à 8
 CAS_DISPONIBLES = [str(i) for i in range(1, 9) if str(i) in st.secrets]
 
 if not CAS_DISPONIBLES:
@@ -28,7 +28,6 @@ if "eval_generated" not in st.session_state:
 if "force_end" not in st.session_state:
     st.session_state.force_end = False
 if "selected_cas" not in st.session_state:
-    # Pré-sélection via l'URL si valide, sinon premier cas disponible
     url_param = str(st.query_params.get("cas", "")).strip()
     st.session_state.selected_cas = url_param if url_param in CAS_DISPONIBLES else CAS_DISPONIBLES[0]
 
@@ -61,7 +60,6 @@ SUJET_ETUDIANT = cas_data["SUJET_ETUDIANT"]
 BAREME_SECRET = cas_data["BAREME_SECRET"]
 MODE_DIALOGUE = cas_data.get("MODE_INTERACTIF", False)
 
-# NOUVEAU : Récupération dynamique des rôles ou assignation par défaut
 MESSAGE_INITIAL = cas_data.get("MESSAGE_INITIAL", "Bonjour. Vous pouvez démarrer. J'interviendrai si besoin d'informations complémentaires.")
 
 ROLE_PAR_DEFAUT = """Tu es un examinateur neutre et rigoureux pour une station d'examen clinique objectif structuré (ECOS) de 8 minutes.
@@ -219,8 +217,25 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Zone de saisie
-    user_input = st.chat_input("Votre réponse...")
+    # Zone de saisie : Voix + Clavier
+    st.write("---")
+    st.caption("🎙️ Cliquez sur **Parler** pour dicter votre intervention (ou écrivez dans le champ ci-dessous) :")
+    
+    vocal_text = speech_to_text(
+        language='fr',
+        start_prompt="🎙️ Parler",
+        stop_prompt="⏹️ Envoyer la réponse",
+        just_once=True,
+        use_container_width=False,
+        key="voice_phase2"
+    )
+    st.caption("*(Note : Lors du premier clic, le navigateur affichera une pop-up vous demandant l'autorisation d'utiliser le microphone. Veillez à l'accepter.)*")
+    
+    text_input = st.chat_input("Votre réponse par écrit...")
+
+    # Récupération de l'entrée (voix ou texte)
+    user_input = vocal_text if vocal_text else text_input
+
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         
@@ -239,9 +254,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
             except Exception as e:
                 st.error(f"Erreur API : {str(e)}")
-        else:
-            pass
-            
+        
         st.rerun()
 
 # --- PHASE 3 : FIN DES 10 MINUTES ET ÉVALUATION ---
@@ -272,8 +285,21 @@ else:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Questions post-évaluation
-    post_eval_input = st.chat_input("Posez vos questions sur le débriefing de l'épreuve...")
+    # Questions post-évaluation (avec support vocal optionnel)
+    st.write("---")
+    post_eval_voice = speech_to_text(
+        language='fr',
+        start_prompt="🎙️ Poser une question à l'oral",
+        stop_prompt="⏹️ Envoyer",
+        just_once=True,
+        key="voice_phase3"
+    )
+    st.caption("*(Note : Lors du premier clic, le navigateur affichera une pop-up vous demandant l'autorisation d'utiliser le microphone. Veillez à l'accepter.)*")
+    
+    post_eval_text = st.chat_input("Posez vos questions sur le débriefing de l'épreuve...")
+
+    post_eval_input = post_eval_voice if post_eval_voice else post_eval_text
+
     if post_eval_input:
         st.session_state.messages.append({"role": "user", "content": post_eval_input})
         
