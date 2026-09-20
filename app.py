@@ -34,6 +34,8 @@ if "last_audio_id_2" not in st.session_state:
     st.session_state.last_audio_id_2 = None
 if "last_audio_id_3" not in st.session_state:
     st.session_state.last_audio_id_3 = None
+if "show_help" not in st.session_state:
+    st.session_state.show_help = False
 
 # --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
 if st.session_state.start_time is None:
@@ -221,15 +223,25 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # --- 2. BOUTON VOCAL EN BAS ---
+    # --- 2. BOUTON VOCAL ET AIDE EN BAS ---
     st.write("") 
-    col_vocal, col_vide = st.columns([1, 1])
+    col_vocal, col_help, col_vide = st.columns([1.5, 1.5, 1])
     with col_vocal:
         audio_dict_2 = mic_recorder(
             start_prompt="🎙️ Enregistrer la voix",
             stop_prompt="⏹️ Arrêter et envoyer",
             key="mic_phase2"
         )
+    with col_help:
+        if st.button("ℹ️ Problème audio ?", key="btn_help_2"):
+            st.session_state.show_help = not st.session_state.show_help
+            st.rerun()
+
+    if st.session_state.show_help:
+        st.info("""**🛠️ Dépannage du microphone :**
+- Si l'IA indique qu'elle n'entend aucune voix, votre navigateur enregistre probablement du silence.
+- Cliquez sur l'icône de paramètres (ou de microphone) dans la barre d'adresse de votre navigateur.
+- Vérifiez que le périphérique sélectionné est bien le **vrai microphone de votre ordinateur** (ex: Lenovo Audio) et non un câble virtuel (ex: Virtual Cable ou AudioRelay).""")
 
     text_input = st.chat_input("Votre réponse par écrit...")
 
@@ -241,14 +253,8 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
         st.session_state.last_audio_id_2 = audio_id_2
         
         audio_bytes = audio_dict_2["bytes"]
-        
-        # --- AJOUT DU LECTEUR AUDIO POUR DÉBOGAGE ---
-        st.info("Écoutez l'enregistrement ci-dessous : si vous n'entendez rien, le problème vient de votre micro/navigateur.")
-        st.audio(audio_bytes)
-        # -------------------------------------------
 
         with st.spinner("Transcription de votre voix..."):
-            # On force le mime_type en wav pour faciliter la lecture par Gemini
             audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
             
             prompt_transcription = """Transcris exactement ce qui est dit dans cet enregistrement audio.
@@ -266,7 +272,7 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
                 resultat_brut = transcription_response.text.strip()
                 
                 if "[AUDIO_VIDE]" in resultat_brut or "00:01" in resultat_brut:
-                    st.warning("⚠️ L'IA n'a détecté aucune voix dans ce fichier audio.")
+                    st.warning("⚠️ L'IA n'a détecté aucune voix. Vérifiez vos paramètres audio (bouton ℹ️).")
                 else:
                     user_input = resultat_brut
             except Exception as e:
@@ -324,14 +330,24 @@ else:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Bouton vocal en bas pour le débriefing
-    col_vocal_3, col_vide_3 = st.columns([1, 1])
+    # Bouton vocal et aide en bas pour le débriefing
+    col_vocal_3, col_help_3, col_vide_3 = st.columns([1.5, 1.5, 1])
     with col_vocal_3:
         audio_dict_3 = mic_recorder(
             start_prompt="🎙️ Poser une question à l'oral",
             stop_prompt="⏹️ Arrêter et envoyer",
             key="mic_phase3"
         )
+    with col_help_3:
+        if st.button("ℹ️ Problème audio ?", key="btn_help_3"):
+            st.session_state.show_help = not st.session_state.show_help
+            st.rerun()
+
+    if st.session_state.show_help:
+        st.info("""**🛠️ Dépannage du microphone :**
+- Si l'IA indique qu'elle n'entend aucune voix, votre navigateur enregistre probablement du silence.
+- Cliquez sur l'icône de paramètres (ou de microphone) dans la barre d'adresse de votre navigateur.
+- Vérifiez que le périphérique sélectionné est bien le **vrai microphone de votre ordinateur** (ex: Lenovo Audio) et non un câble virtuel (ex: Virtual Cable ou AudioRelay).""")
         
     post_eval_text = st.chat_input("Posez vos questions sur le débriefing de l'épreuve...")
 
@@ -342,11 +358,6 @@ else:
         st.session_state.last_audio_id_3 = audio_id_3
         
         audio_bytes = audio_dict_3["bytes"]
-        
-        # --- AJOUT DU LECTEUR AUDIO POUR DÉBOGAGE ---
-        st.info("Écoutez l'enregistrement ci-dessous : si vous n'entendez rien, le problème vient de votre micro/navigateur.")
-        st.audio(audio_bytes)
-        # -------------------------------------------
 
         with st.spinner("Transcription de votre question..."):
             audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
@@ -367,7 +378,7 @@ else:
                 if "[AUDIO_VIDE]" not in resultat_brut and "00:01" not in resultat_brut:
                     post_eval_input = resultat_brut
                 else:
-                    st.warning("⚠️ L'IA n'a détecté aucune voix dans ce fichier audio.")
+                    st.warning("⚠️ L'IA n'a détecté aucune voix. Vérifiez vos paramètres audio (bouton ℹ️).")
             except Exception as e:
                 st.error(f"Erreur de transcription audio : {str(e)}")
     elif post_eval_text:
