@@ -4,7 +4,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
-from streamlit_mic_recorder import speech_to_text
+from streamlit_mic_recorder import mic_recorder
 
 st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 
@@ -30,6 +30,10 @@ if "force_end" not in st.session_state:
 if "selected_cas" not in st.session_state:
     url_param = str(st.query_params.get("cas", "")).strip()
     st.session_state.selected_cas = url_param if url_param in CAS_DISPONIBLES else CAS_DISPONIBLES[0]
+if "last_audio_id_2" not in st.session_state:
+    st.session_state.last_audio_id_2 = None
+if "last_audio_id_3" not in st.session_state:
+    st.session_state.last_audio_id_3 = None
 
 # --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
 if st.session_state.start_time is None:
@@ -204,6 +208,18 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     with col1:
         components.html(js_code, height=50)
 
+    # --- PLACEMENT FIXE DU BOUTON VOCAL EN HAUT ---
+    st.write("---")
+    col_vocal, col_vide = st.columns([2, 1])
+    with col_vocal:
+        audio_dict_2 = mic_recorder(
+            start_prompt="🎙️ Enregistrer la voix",
+            stop_prompt="⏹️ Arrêter et envoyer",
+            key="mic_phase2"
+        )
+    st.caption("*(Autorisez le micro lors du 1er clic. Le bouton restera toujours visible ici)*")
+    st.divider()
+
     # Message initial automatique
     if not st.session_state.messages:
         if MODE_DIALOGUE:
@@ -217,25 +233,41 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Zone de saisie : Voix + Clavier
-    st.write("---")
-    st.caption("🎙️ Cliquez sur **Parler** pour dicter votre intervention (ou écrivez dans le champ ci-dessous) :")
-    
-    vocal_text = speech_to_text(
-        language='fr',
-        start_prompt="🎙️ Parler",
-        stop_prompt="⏹️ Envoyer la réponse",
-        just_once=True,
-        use_container_width=False,
-        key="voice_phase2"
-    )
-    st.caption("*(Note : Lors du premier clic, le navigateur affichera une pop-up vous demandant l'autorisation d'utiliser le microphone. Veillez à l'accepter.)*")
-    
+    # Champ de texte classique en bas
     text_input = st.chat_input("Votre réponse par écrit...")
 
-    # Récupération de l'entrée (voix ou texte)
-    user_input = vocal_text if vocal_text else text_input
+    # --- LOGIQUE DE TRAITEMENT DE L'ENTRÉE (VOIX OU TEXTE) ---
+    user_input = None
+    
+    # 1. On vérifie si un nouvel audio a été enregistré via un hash de l'audio
+    audio_id_2 = hash(audio_dict_2["bytes"]) if audio_dict_2 else None
+    
+    if audio_dict_2 and audio_id_2 != st.session_state.last_audio_id_2:
+        # C'est un nouvel enregistrement ! On met à jour l'ID
+        st.session_state.last_audio_id_2 = audio_id_2
+        
+        with st.spinner("Transcription de votre voix par l'IA..."):
+            audio_bytes = audio_dict_2["bytes"]
+            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/webm")
+            
+            try:
+                # On demande à Gemini de faire uniquement de la transcription
+                transcription_response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=[
+                        audio_part, 
+                        "Transcris exactement cet enregistrement vocal en français. Ne réponds pas à l'audio, écris uniquement ce qui est dit, sans commentaires."
+                    ]
+                )
+                user_input = transcription_response.text
+            except Exception as e:
+                st.error(f"Erreur de transcription audio : {str(e)}")
+                
+    # 2. Sinon, on vérifie si l'utilisateur a tapé du texte
+    elif text_input:
+        user_input = text_input
 
+    # --- ENVOI DE LA RÉPONSE À L'EXAMINATEUR ---
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         
@@ -280,26 +312,46 @@ else:
                 
         st.rerun()
 
+    # Bouton vocal pour la phase de débriefing
+    st.write("---")
+    col_vocal_3, col_vide_3 = st.columns([2, 1])
+    with col_vocal_3:
+        audio_dict_3 = mic_recorder(
+            start_prompt="🎙️ Poser une question à l'oral",
+            stop_prompt="⏹️ Arrêter et envoyer",
+            key="mic_phase3"
+        )
+    st.divider()
+
     # Affichage du fil complet avec l'évaluation
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Questions post-évaluation (avec support vocal optionnel)
-    st.write("---")
-    post_eval_voice = speech_to_text(
-        language='fr',
-        start_prompt="🎙️ Poser une question à l'oral",
-        stop_prompt="⏹️ Envoyer",
-        just_once=True,
-        key="voice_phase3"
-    )
-    st.caption("*(Note : Lors du premier clic, le navigateur affichera une pop-up vous demandant l'autorisation d'utiliser le microphone. Veillez à l'accepter.)*")
-    
+    # Champ texte pour la phase de débriefing
     post_eval_text = st.chat_input("Posez vos questions sur le débriefing de l'épreuve...")
 
-    post_eval_input = post_eval_voice if post_eval_voice else post_eval_text
+    # Logique de traitement de la question de débriefing
+    post_eval_input = None
+    audio_id_3 = hash(audio_dict_3["bytes"]) if audio_dict_3 else None
 
+    if audio_dict_3 and audio_id_3 != st.session_state.last_audio_id_3:
+        st.session_state.last_audio_id_3 = audio_id_3
+        with st.spinner("Transcription de votre question..."):
+            audio_bytes = audio_dict_3["bytes"]
+            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/webm")
+            try:
+                transcription_response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=[audio_part, "Transcris exactement cet enregistrement vocal en français. N'ajoute aucun commentaire."]
+                )
+                post_eval_input = transcription_response.text
+            except Exception as e:
+                st.error(f"Erreur de transcription audio : {str(e)}")
+    elif post_eval_text:
+        post_eval_input = post_eval_text
+
+    # Envoi de la question
     if post_eval_input:
         st.session_state.messages.append({"role": "user", "content": post_eval_input})
         
