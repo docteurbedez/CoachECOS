@@ -11,12 +11,15 @@ from streamlit_mic_recorder import mic_recorder
 st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 
 # -----------------------------------------------------------------------------
-# 0. GESTION DE LA CONFIGURATION D'ACCÈS (PANNEAU ADMIN)
+# 0. GESTION DES CONFIGURATIONS ET DU FINGERPRINT NAVIGATEUR
 # -----------------------------------------------------------------------------
 CONFIG_FILE = "config_ecos.json"
+TRACKING_FILE = "tracking_ecos.json"
+
 DEFAULT_CONFIG = {
-    "auth_mode": "Aucune restriction", # Options: "Aucune restriction", "Mot de passe global", "SSO (Simulation)"
+    "require_student_pwd": True,
     "global_password": "ecos",
+    "teacher_pwd": "ens",
     "time_restriction": False,
     "start_time": "08:00",
     "end_time": "18:00",
@@ -24,26 +27,50 @@ DEFAULT_CONFIG = {
     "max_concurrent": 2
 }
 
-def load_config():
-    if os.path.exists(CONFIG_FILE):
+def load_json(filepath, default):
+    if os.path.exists(filepath):
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(filepath, "r") as f:
                 return json.load(f)
-        except:
-            return DEFAULT_CONFIG
-    return DEFAULT_CONFIG
+        except: pass
+    return default
 
-def save_config(config):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f)
+def save_json(filepath, data):
+    with open(filepath, "w") as f:
+        json.dump(data, f)
 
-# Chargement de la configuration actuelle
-current_config = load_config()
+current_config = load_json(CONFIG_FILE, DEFAULT_CONFIG)
+
+# --- EMPREINTE DU NAVIGATEUR (FINGERPRINT JS) ---
+# Injecte un ID unique dans le stockage du navigateur et le remonte via l'URL
+device_id = st.query_params.get("device_id")
+if not device_id:
+    js_code = """
+    <script>
+    try {
+        let did = localStorage.getItem('ecos_device_id');
+        if (!did) {
+            did = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'id_' + Math.random().toString(36).substring(2);
+            localStorage.setItem('ecos_device_id', did);
+        }
+        const urlParams = new URLSearchParams(window.parent.location.search);
+        if (urlParams.get('device_id') !== did) {
+            urlParams.set('device_id', did);
+            window.parent.location.search = urlParams.toString();
+        }
+    } catch(e) {
+        console.error("Erreur de fingerprint", e);
+    }
+    </script>
+    """
+    components.html(js_code, height=0)
+    st.info("Initialisation de la session sécurisée... Veuillez patienter.")
+    st.stop()
 
 # --- BARRE LATÉRALE : PANNEAU ENSEIGNANT ---
 with st.sidebar:
     st.header("⚙️ Administration ECOS")
-    admin_input = st.text_input("Mot de passe enseignant :", type="password")
+    admin_input = st.text_input("Mot de passe administration :", type="password")
     
     if admin_input == st.secrets.get("ADMIN_PWD", "admin123"):
         st.success("Accès autorisé")
@@ -51,12 +78,9 @@ with st.sidebar:
         st.subheader("Règles d'accès étudiants")
         
         # 1. Mode de connexion
-        new_auth = st.selectbox(
-            "Mode d'authentification", 
-            ["Aucune restriction", "Mot de passe global", "SSO (Simulation)"], 
-            index=["Aucune restriction", "Mot de passe global", "SSO (Simulation)"].index(current_config["auth_mode"])
-        )
-        new_pwd = st.text_input("Mot de passe étudiant (si applicable) :", value=current_config["global_password"])
+        new_req_pwd = st.checkbox("Exiger un mot de passe étudiant", value=current_config.get("require_student_pwd", True))
+        new_pwd = st.text_input("Mot de passe étudiant :", value=current_config.get("global_password", "ecos"))
+        new_teacher_pwd = st.text_input("Mot de passe Enseignant (illimité) :", value=current_config.get("teacher_pwd", "ens"))
         
         st.divider()
         # 2. Horaires
@@ -65,21 +89,22 @@ with st.sidebar:
         new_end = st.time_input("Heure de fermeture", value=datetime.strptime(current_config["end_time"], "%H:%M").time())
         
         st.divider()
-        # 3. Quotas et File d'attente
-        new_max_attempts = st.number_input("Essais max / jour / étudiant", min_value=1, value=current_config["max_attempts"])
+        # 3. Quotas
+        new_max_attempts = st.number_input("Essais max / jour / appareil", min_value=1, value=current_config["max_attempts"])
         new_max_conc = st.number_input("Étudiants en parallèle (File d'attente)", min_value=1, max_value=10, value=current_config["max_concurrent"])
         
         if st.button("💾 Sauvegarder la configuration", use_container_width=True):
             current_config.update({
-                "auth_mode": new_auth,
+                "require_student_pwd": new_req_pwd,
                 "global_password": new_pwd,
+                "teacher_pwd": new_teacher_pwd,
                 "time_restriction": new_time_rest,
                 "start_time": new_start.strftime("%H:%M"),
                 "end_time": new_end.strftime("%H:%M"),
                 "max_attempts": new_max_attempts,
                 "max_concurrent": new_max_conc
             })
-            save_config(current_config)
+            save_json(CONFIG_FILE, current_config)
             st.success("Paramètres enregistrés avec succès !")
     elif admin_input:
         st.error("Mot de passe incorrect")
@@ -93,61 +118,55 @@ if current_config.get("time_restriction"):
     start_t = datetime.strptime(current_config["start_time"], "%H:%M").time()
     end_t = datetime.strptime(current_config["end_time"], "%H:%M").time()
     
-    # Gestion du passage minuit si end_time < start_time
-    is_open = False
-    if start_t <= end_t:
-        is_open = start_t <= now <= end_t
-    else:
-        is_open = now >= start_t or now <= end_t
-        
+    is_open = (start_t <= now <= end_t) if start_t <= end_t else (now >= start_t or now <= end_t)
     if not is_open:
         st.title("⏳ Épreuve fermée")
         st.warning(f"L'accès à la station d'ECOS n'est autorisé qu'entre {current_config['start_time']} et {current_config['end_time']}.")
         st.stop()
 
-# 2. Vérification de l'authentification
+# 2. Gestion de l'authentification et des quotas
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+if "is_teacher" not in st.session_state:
+    st.session_state.is_teacher = False
 if "student_id" not in st.session_state:
     st.session_state.student_id = None
 
-auth_mode = current_config.get("auth_mode", "Aucune restriction")
-
-if auth_mode == "Aucune restriction":
-    st.session_state.authenticated = True
-    if not st.session_state.student_id:
-        st.session_state.student_id = f"Anonyme_{int(time.time())}"
+today_str = datetime.now().strftime("%Y-%m-%d")
+tracking_data = load_json(TRACKING_FILE, {})
+current_device_attempts = tracking_data.get(device_id, {}).get(today_str, 0)
+max_att = current_config["max_attempts"]
 
 if not st.session_state.authenticated:
-    st.title("🔒 Accès restreint")
-    st.info("Cette épreuve ECOS nécessite une authentification pour accéder aux stations.")
+    st.title("🔒 Accès à l'épreuve ECOS")
+    st.info(f"Votre appareil a consommé {current_device_attempts}/{max_att} essais aujourd'hui.")
     
-    if auth_mode == "Mot de passe global":
-        with st.form("login_form"):
-            student_name = st.text_input("Nom de l'étudiant / Numéro étudiant :", placeholder="Ex: Jean Dupont ou 20240123")
-            pwd = st.text_input("Mot de passe de l'épreuve :", type="password")
-            submit = st.form_submit_button("Se connecter", use_container_width=True)
-            if submit:
-                if pwd == current_config.get("global_password", "") and student_name.strip():
+    with st.form("login_form"):
+        student_name = st.text_input("Nom de l'étudiant / Numéro :", placeholder="Ex: Jean Dupont")
+        
+        label_pwd = "Mot de passe :" if current_config["require_student_pwd"] else "Mot de passe (réservé Enseignant) :"
+        pwd = st.text_input(label_pwd, type="password")
+        
+        submit = st.form_submit_button("Se connecter", use_container_width=True)
+        
+        if submit:
+            if not student_name.strip():
+                st.error("Veuillez saisir votre nom.")
+            elif pwd == current_config["teacher_pwd"]:
+                st.session_state.authenticated = True
+                st.session_state.is_teacher = True
+                st.session_state.student_id = f"👨‍🏫 {student_name.strip()}"
+                st.rerun()
+            else:
+                if current_config["require_student_pwd"] and pwd != current_config["global_password"]:
+                    st.error("Mot de passe étudiant incorrect.")
+                elif current_device_attempts >= max_att:
+                    st.error(f"❌ Quota d'essais atteint pour aujourd'hui sur cet appareil ({max_att} max).")
+                else:
                     st.session_state.authenticated = True
+                    st.session_state.is_teacher = False
                     st.session_state.student_id = student_name.strip()
                     st.rerun()
-                else:
-                    st.error("Mot de passe incorrect ou identifiant manquant.")
-                    
-    elif auth_mode == "SSO (Simulation)":
-        with st.form("sso_form"):
-            st.markdown("🔑 **Connexion Institutionnelle**")
-            email = st.text_input("Email universitaire :", placeholder="prenom.nom@univ-lille.fr")
-            sso_pwd = st.text_input("Mot de passe :", type="password")
-            submit = st.form_submit_button("Connexion SSO", use_container_width=True)
-            if submit:
-                if email.endswith("@univ-lille.fr") and sso_pwd:
-                    st.session_state.authenticated = True
-                    st.session_state.student_id = email.split('@')[0]
-                    st.rerun()
-                else:
-                    st.error("Veuillez utiliser une adresse @univ-lille.fr valide et renseigner votre mot de passe.")
     st.stop()
 
 # -----------------------------------------------------------------------------
@@ -194,6 +213,21 @@ if st.session_state.start_time is None:
     )
 
     if st.button("Démarrer la station (10 minutes)"):
+        # Décompte du quota uniquement lors du lancement de l'épreuve (si étudiant)
+        if not st.session_state.is_teacher:
+            tracking_data = load_json(TRACKING_FILE, {})
+            current_count = tracking_data.get(device_id, {}).get(today_str, 0)
+            
+            if current_count >= current_config["max_attempts"]:
+                st.error("Vous avez épuisé vos essais depuis votre dernière connexion.")
+                st.session_state.authenticated = False
+                st.rerun()
+                
+            if device_id not in tracking_data:
+                tracking_data[device_id] = {}
+            tracking_data[device_id][today_str] = current_count + 1
+            save_json(TRACKING_FILE, tracking_data)
+
         st.session_state.selected_cas = choix
         st.session_state.start_time = time.time()
         st.rerun()
@@ -222,9 +256,9 @@ POSTURE PENDANT L'ÉCHANGE :
 
 ROLE_IA_ACTUEL = cas_data.get("ROLE_IA", ROLE_PAR_DEFAUT)
 
-DUREE_LECTURE = 120    # 2 minutes = 120 s
-DUREE_ECHANGE = 480    # 8 minutes = 480 s
-DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE  # 10 minutes = 600 s
+DUREE_LECTURE = 120
+DUREE_ECHANGE = 480
+DUREE_TOTALE = DUREE_LECTURE + DUREE_ECHANGE
 
 MODEL_NAME = "gemini-3.5-flash-lite"
 
@@ -261,7 +295,6 @@ client = genai.Client(api_key=api_key)
 with st.expander("Consignes et dossier patient", expanded=True):
     st.markdown(SUJET_ETUDIANT, unsafe_allow_html=True)
     
-    # --- BLOC MODIFIÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
     if URL_MODELE_3D:
         html_3d = f"""
         <!DOCTYPE html>
@@ -359,44 +392,31 @@ with st.expander("Consignes et dossier patient", expanded=True):
                 const fullscreenBtn = document.getElementById('btn-fullscreen');
                 const container = document.getElementById('fs-container');
                 
-                // Réinitialisation de la caméra
                 resetBtn.addEventListener('click', () => {{
                     viewer.cameraOrbit = '0deg 75deg 105%';
                     viewer.cameraTarget = 'auto auto auto';
                     viewer.fieldOfView = 'auto';
                 }});
 
-                // Gestion du mode plein écran
                 fullscreenBtn.addEventListener('click', () => {{
                     if (!document.fullscreenElement) {{
-                        if (container.requestFullscreen) {{
-                            container.requestFullscreen();
-                        }} else if (container.webkitRequestFullscreen) {{ /* Safari */
-                            container.webkitRequestFullscreen();
-                        }}
+                        if (container.requestFullscreen) container.requestFullscreen();
+                        else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen();
                     }} else {{
-                        if (document.exitFullscreen) {{
-                            document.exitFullscreen();
-                        }} else if (document.webkitExitFullscreen) {{
-                            document.webkitExitFullscreen();
-                        }}
+                        if (document.exitFullscreen) document.exitFullscreen();
+                        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
                     }}
                 }});
                 
-                // Mettre à jour le texte du bouton lors du changement d'état (Échap)
                 document.addEventListener('fullscreenchange', () => {{
-                    if (document.fullscreenElement) {{
-                        fullscreenBtn.innerHTML = '✖ Quitter plein écran';
-                    }} else {{
-                        fullscreenBtn.innerHTML = '⛶ Plein écran';
-                    }}
+                    if (document.fullscreenElement) fullscreenBtn.innerHTML = '✖ Quitter plein écran';
+                    else fullscreenBtn.innerHTML = '⛶ Plein écran';
                 }});
             </script>
         </body>
         </html>
         """
         components.html(html_3d, height=510)
-    # -----------------------------------------------------------
 
 st.divider()
 
@@ -448,7 +468,6 @@ if elapsed < DUREE_LECTURE and not st.session_state.force_end:
 elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     tps_restant = int(DUREE_TOTALE - elapsed)
     
-    # Message initial automatique
     if not st.session_state.messages:
         if MODE_DIALOGUE:
             premier_message = MESSAGE_INITIAL
@@ -456,14 +475,12 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             premier_message = "Bonjour. Le jury vous écoute et n'interviendra pas pendant votre exposé. Procédez à votre présentation."
         st.session_state.messages.append({"role": "assistant", "content": premier_message})
 
-    # --- 1. AFFICHAGE DE L'HISTORIQUE (EN PREMIER) ---
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     st.write("---")
 
-    # --- 2. CHRONOMÈTRE GLOBAL ET BOUTON CLÔTURE (DÉPLACÉS EN BAS) ---
     col_chrono, col_cloture = st.columns([3, 1])
     with col_cloture:
         if st.button("Clôturer l'épreuve", use_container_width=True):
@@ -507,7 +524,6 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     with col_chrono:
         components.html(js_code, height=50)
 
-    # --- 3. BOUTON VOCAL ET AIDE (EN BAS) ---
     st.write("") 
     col_vocal, col_help, col_vide = st.columns([1.5, 1.5, 1])
     with col_vocal:
@@ -524,27 +540,24 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     if st.session_state.show_help:
         st.info("""**🛠️ Dépannage du microphone :**
 - Si l'IA indique qu'elle n'entend aucune voix, votre navigateur enregistre probablement du silence.
-- Cliquez sur l'icône de paramètres (ou de microphone) dans la barre d'adresse de votre navigateur.
-- Vérifiez que le périphérique sélectionné est bien le **vrai microphone de votre ordinateur** (ex: Lenovo Audio) et non un câble virtuel (ex: Virtual Cable ou AudioRelay).""")
+- Cliquez sur l'icône de paramètres dans la barre d'adresse de votre navigateur.
+- Vérifiez que le périphérique sélectionné est bien le **vrai microphone de votre ordinateur**.""")
 
     text_input = st.chat_input("Votre réponse par écrit...")
 
-    # --- 4. LOGIQUE DE TRANSCRIPTION STRICTE ---
     user_input = None
     audio_id_2 = hash(audio_dict_2["bytes"]) if audio_dict_2 else None
     
     if audio_dict_2 and audio_id_2 != st.session_state.last_audio_id_2:
         st.session_state.last_audio_id_2 = audio_id_2
-        
         audio_bytes = audio_dict_2["bytes"]
 
         with st.spinner("Transcription de votre voix..."):
             audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
-            
             prompt_transcription = """Transcris exactement ce qui est dit dans cet enregistrement audio.
             CONSIGNES STRICTES :
             1. Ne génère que le texte prononcé, mot pour mot.
-            2. N'inclus JAMAIS d'horodatage ou de timecode (comme 00:01).
+            2. N'inclus JAMAIS d'horodatage ou de timecode.
             3. Ne décris pas les bruits de fond ni les silences.
             4. Si tu n'entends absolument aucune voix humaine, réponds UNIQUEMENT par le mot : [AUDIO_VIDE]"""
             
@@ -565,7 +578,6 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
     elif text_input:
         user_input = text_input
 
-    # --- ENVOI DE LA RÉPONSE À L'EXAMINATEUR ---
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
         
@@ -594,7 +606,7 @@ else:
     if not st.session_state.eval_generated:
         with st.spinner("Analyse de la performance et génération du bilan évaluatif..."):
             history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
-            eval_prompt = f"Voici la transcription complète de l'oral de 8 minutes :\n\n{history_text}\n\n[TEMPS ÉCOULÉ] Rédige le bilan évaluatif en appliquant strictement les consignes (Satisfaisant / En cours d'acquisition / Insuffisant) sans dévoiler la pondération chiffrée."
+            eval_prompt = f"Voici la transcription complète de l'oral de 8 minutes :\n\n{history_text}\n\n[TEMPS ÉCOULÉ] Rédige le bilan évaluatif en appliquant strictement les consignes sans dévoiler la pondération chiffrée."
             
             try:
                 response = client.models.generate_content(
@@ -609,14 +621,12 @@ else:
                 
         st.rerun()
 
-    # Affichage du fil complet avec l'évaluation (EN PREMIER)
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     st.write("---")
 
-    # Bouton vocal et aide en bas pour le débriefing
     col_vocal_3, col_help_3, col_vide_3 = st.columns([1.5, 1.5, 1])
     with col_vocal_3:
         audio_dict_3 = mic_recorder(
@@ -632,8 +642,8 @@ else:
     if st.session_state.show_help:
         st.info("""**🛠️ Dépannage du microphone :**
 - Si l'IA indique qu'elle n'entend aucune voix, votre navigateur enregistre probablement du silence.
-- Cliquez sur l'icône de paramètres (ou de microphone) dans la barre d'adresse de votre navigateur.
-- Vérifiez que le périphérique sélectionné est bien le **vrai microphone de votre ordinateur** (ex: Lenovo Audio) et non un câble virtuel (ex: Virtual Cable ou AudioRelay).""")
+- Cliquez sur l'icône de paramètres dans la barre d'adresse de votre navigateur.
+- Vérifiez que le périphérique sélectionné est bien le **vrai microphone de votre ordinateur**.""")
         
     post_eval_text = st.chat_input("Posez vos questions sur le débriefing de l'épreuve...")
 
@@ -642,16 +652,14 @@ else:
 
     if audio_dict_3 and audio_id_3 != st.session_state.last_audio_id_3:
         st.session_state.last_audio_id_3 = audio_id_3
-        
         audio_bytes = audio_dict_3["bytes"]
 
         with st.spinner("Transcription de votre question..."):
             audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
-            
             prompt_transcription = """Transcris exactement ce qui est dit dans cet enregistrement audio.
             CONSIGNES STRICTES :
             1. Ne génère que le texte prononcé, mot pour mot.
-            2. N'inclus JAMAIS d'horodatage ou de timecode (comme 00:01).
+            2. N'inclus JAMAIS d'horodatage ou de timecode.
             3. Ne décris pas les bruits de fond ni les silences.
             4. Si tu n'entends absolument aucune voix humaine, réponds UNIQUEMENT par le mot : [AUDIO_VIDE]"""
             
