@@ -175,6 +175,15 @@ if "last_audio_id_3" not in st.session_state:
 if "show_help" not in st.session_state:
     st.session_state.show_help = False
 
+# Fonction pour revenir à l'accueil
+def reset_to_home():
+    st.session_state.start_time = None
+    st.session_state.messages = []
+    st.session_state.eval_generated = False
+    st.session_state.force_end = False
+    st.session_state.last_audio_id_2 = None
+    st.session_state.last_audio_id_3 = None
+
 # --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
 if st.session_state.start_time is None:
     st.title("Station d'ECOS")
@@ -339,10 +348,14 @@ elapsed = time.time() - st.session_state.start_time
 if elapsed < DUREE_LECTURE and not st.session_state.force_end:
     tps_restant = int(DUREE_LECTURE - elapsed)
     
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col2:
         if st.button("Passer la lecture", use_container_width=True):
             st.session_state.start_time = time.time() - DUREE_LECTURE
+            st.rerun()
+    with col3:
+        if st.button("🏠 Retour accueil", use_container_width=True):
+            reset_to_home()
             st.rerun()
 
     js_code_lecture = f"""
@@ -393,10 +406,14 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
 
     st.write("---")
 
-    col_chrono, col_cloture = st.columns([3, 1])
+    col_chrono, col_cloture, col_retour = st.columns([2, 1, 1])
     with col_cloture:
         if st.button("Clôturer l'épreuve", use_container_width=True):
             st.session_state.force_end = True
+            st.rerun()
+    with col_retour:
+        if st.button("🏠 Retour accueil", use_container_width=True):
+            reset_to_home()
             st.rerun()
 
     js_code = f"""
@@ -513,7 +530,13 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
 
 # --- PHASE 3 : FIN DES 10 MINUTES ET ÉVALUATION ---
 else:
-    st.error("L'épreuve est terminée.")
+    col_err, col_ret = st.columns([3, 1])
+    with col_err:
+        st.error("L'épreuve est terminée.")
+    with col_ret:
+        if st.button("🏠 Retour accueil", use_container_width=True):
+            reset_to_home()
+            st.rerun()
 
     if not st.session_state.eval_generated:
         with st.spinner("Analyse de la performance et génération du bilan évaluatif..."):
