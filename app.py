@@ -85,6 +85,72 @@ with st.sidebar:
         st.error("Mot de passe incorrect")
 
 # -----------------------------------------------------------------------------
+# 0.5. VÉRIFICATION DES RESTRICTIONS (HORAIRES ET AUTHENTIFICATION)
+# -----------------------------------------------------------------------------
+# 1. Vérification des horaires (si activée)
+if current_config.get("time_restriction"):
+    now = datetime.now().time()
+    start_t = datetime.strptime(current_config["start_time"], "%H:%M").time()
+    end_t = datetime.strptime(current_config["end_time"], "%H:%M").time()
+    
+    # Gestion du passage minuit si end_time < start_time
+    is_open = False
+    if start_t <= end_t:
+        is_open = start_t <= now <= end_t
+    else:
+        is_open = now >= start_t or now <= end_t
+        
+    if not is_open:
+        st.title("⏳ Épreuve fermée")
+        st.warning(f"L'accès à la station d'ECOS n'est autorisé qu'entre {current_config['start_time']} et {current_config['end_time']}.")
+        st.stop()
+
+# 2. Vérification de l'authentification
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "student_id" not in st.session_state:
+    st.session_state.student_id = None
+
+auth_mode = current_config.get("auth_mode", "Aucune restriction")
+
+if auth_mode == "Aucune restriction":
+    st.session_state.authenticated = True
+    if not st.session_state.student_id:
+        st.session_state.student_id = f"Anonyme_{int(time.time())}"
+
+if not st.session_state.authenticated:
+    st.title("🔒 Accès restreint")
+    st.info("Cette épreuve ECOS nécessite une authentification pour accéder aux stations.")
+    
+    if auth_mode == "Mot de passe global":
+        with st.form("login_form"):
+            student_name = st.text_input("Nom de l'étudiant / Numéro étudiant :", placeholder="Ex: Jean Dupont ou 20240123")
+            pwd = st.text_input("Mot de passe de l'épreuve :", type="password")
+            submit = st.form_submit_button("Se connecter", use_container_width=True)
+            if submit:
+                if pwd == current_config.get("global_password", "") and student_name.strip():
+                    st.session_state.authenticated = True
+                    st.session_state.student_id = student_name.strip()
+                    st.rerun()
+                else:
+                    st.error("Mot de passe incorrect ou identifiant manquant.")
+                    
+    elif auth_mode == "SSO (Simulation)":
+        with st.form("sso_form"):
+            st.markdown("🔑 **Connexion Institutionnelle**")
+            email = st.text_input("Email universitaire :", placeholder="prenom.nom@univ-lille.fr")
+            sso_pwd = st.text_input("Mot de passe :", type="password")
+            submit = st.form_submit_button("Connexion SSO", use_container_width=True)
+            if submit:
+                if email.endswith("@univ-lille.fr") and sso_pwd:
+                    st.session_state.authenticated = True
+                    st.session_state.student_id = email.split('@')[0]
+                    st.rerun()
+                else:
+                    st.error("Veuillez utiliser une adresse @univ-lille.fr valide et renseigner votre mot de passe.")
+    st.stop()
+
+# -----------------------------------------------------------------------------
 # 1. DÉTECTION ET SÉLECTION DU CAS CLINIQUE (1 À 8)
 # -----------------------------------------------------------------------------
 
@@ -116,6 +182,7 @@ if "show_help" not in st.session_state:
 # --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
 if st.session_state.start_time is None:
     st.title("Station d'ECOS")
+    st.success(f"Connecté en tant que : **{st.session_state.student_id}**")
     st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'oral.")
 
     index_default = CAS_DISPONIBLES.index(st.session_state.selected_cas)
