@@ -1,5 +1,7 @@
 import os
 import time
+import json
+from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
@@ -7,6 +9,80 @@ from google.genai import types
 from streamlit_mic_recorder import mic_recorder
 
 st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
+
+# -----------------------------------------------------------------------------
+# 0. GESTION DE LA CONFIGURATION D'ACCÈS (PANNEAU ADMIN)
+# -----------------------------------------------------------------------------
+CONFIG_FILE = "config_ecos.json"
+DEFAULT_CONFIG = {
+    "auth_mode": "Aucune restriction", # Options: "Aucune restriction", "Mot de passe global", "SSO (Simulation)"
+    "global_password": "ecos",
+    "time_restriction": False,
+    "start_time": "08:00",
+    "end_time": "18:00",
+    "max_attempts": 3,
+    "max_concurrent": 2
+}
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return DEFAULT_CONFIG
+    return DEFAULT_CONFIG
+
+def save_config(config):
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f)
+
+# Chargement de la configuration actuelle
+current_config = load_config()
+
+# --- BARRE LATÉRALE : PANNEAU ENSEIGNANT ---
+with st.sidebar:
+    st.header("⚙️ Administration ECOS")
+    admin_input = st.text_input("Mot de passe enseignant :", type="password")
+    
+    if admin_input == st.secrets.get("ADMIN_PWD", "admin123"):
+        st.success("Accès autorisé")
+        st.divider()
+        st.subheader("Règles d'accès étudiants")
+        
+        # 1. Mode de connexion
+        new_auth = st.selectbox(
+            "Mode d'authentification", 
+            ["Aucune restriction", "Mot de passe global", "SSO (Simulation)"], 
+            index=["Aucune restriction", "Mot de passe global", "SSO (Simulation)"].index(current_config["auth_mode"])
+        )
+        new_pwd = st.text_input("Mot de passe étudiant (si applicable) :", value=current_config["global_password"])
+        
+        st.divider()
+        # 2. Horaires
+        new_time_rest = st.checkbox("Restreindre par horaires", value=current_config["time_restriction"])
+        new_start = st.time_input("Heure d'ouverture", value=datetime.strptime(current_config["start_time"], "%H:%M").time())
+        new_end = st.time_input("Heure de fermeture", value=datetime.strptime(current_config["end_time"], "%H:%M").time())
+        
+        st.divider()
+        # 3. Quotas et File d'attente
+        new_max_attempts = st.number_input("Essais max / jour / étudiant", min_value=1, value=current_config["max_attempts"])
+        new_max_conc = st.number_input("Étudiants en parallèle (File d'attente)", min_value=1, max_value=10, value=current_config["max_concurrent"])
+        
+        if st.button("💾 Sauvegarder la configuration", use_container_width=True):
+            current_config.update({
+                "auth_mode": new_auth,
+                "global_password": new_pwd,
+                "time_restriction": new_time_rest,
+                "start_time": new_start.strftime("%H:%M"),
+                "end_time": new_end.strftime("%H:%M"),
+                "max_attempts": new_max_attempts,
+                "max_concurrent": new_max_conc
+            })
+            save_config(current_config)
+            st.success("Paramètres enregistrés avec succès !")
+    elif admin_input:
+        st.error("Mot de passe incorrect")
 
 # -----------------------------------------------------------------------------
 # 1. DÉTECTION ET SÉLECTION DU CAS CLINIQUE (1 À 8)
@@ -118,7 +194,7 @@ client = genai.Client(api_key=api_key)
 with st.expander("Consignes et dossier patient", expanded=True):
     st.markdown(SUJET_ETUDIANT, unsafe_allow_html=True)
     
-# --- BLOC MODIFIÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
+    # --- BLOC MODIFIÉ POUR AFFICHER LE MODÈLE 3D S'IL EXISTE ---
     if URL_MODELE_3D:
         html_3d = f"""
         <!DOCTYPE html>
