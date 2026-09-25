@@ -1,7 +1,10 @@
 import os
 import time
 import json
+import csv
+from io import StringIO
 from datetime import datetime
+import boto3
 import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
@@ -11,7 +14,7 @@ from streamlit_mic_recorder import mic_recorder
 st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 
 # -----------------------------------------------------------------------------
-# 0. GESTION DES CONFIGURATIONS ET DU SUIVI DES ESSAIS
+# 0. GESTION DES CONFIGURATIONS ET DU CLIENT CLOUDFLARE R2
 # -----------------------------------------------------------------------------
 CONFIG_FILE = "config_ecos.json"
 TRACKING_FILE = "tracking_ecos.json"
@@ -40,16 +43,27 @@ def save_json(filepath, data):
     with open(filepath, "w") as f:
         json.dump(data, f)
 
-# Fusion sécurisée de la configuration
 saved_config = load_json(CONFIG_FILE, {})
 current_config = DEFAULT_CONFIG.copy()
 current_config.update(saved_config)
+
+# Initialisation du client S3 pour Cloudflare R2
+@st.cache_resource
+def get_s3_client():
+    if "R2_ACCOUNT_ID" in st.secrets:
+        return boto3.client('s3',
+            endpoint_url=f"https://{st.secrets['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+            aws_access_key_id=st.secrets['R2_ACCESS_KEY'],
+            aws_secret_access_key=st.secrets['R2_SECRET_KEY']
+        )
+    return None
+
+s3 = get_s3_client()
 
 # --- FONCTIONS DE LA FILE D'ATTENTE ---
 def clean_active_sessions():
     sessions = load_json(ACTIVE_SESSIONS_FILE, {})
     now = time.time()
-    # Délai de nettoyage à 900 secondes (15 minutes). Protège contre les fermetures brutales d'onglets.
     cleaned = {k: v for k, v in sessions.items() if now - v < 900}
     if len(cleaned) != len(sessions):
         save_json(ACTIVE_SESSIONS_FILE, cleaned)
@@ -76,19 +90,16 @@ with st.sidebar:
         st.divider()
         st.subheader("Règles d'accès étudiants")
         
-        # 1. Mode de connexion
         new_req_pwd = st.checkbox("Exiger un mot de passe étudiant", value=current_config["require_student_pwd"])
         new_pwd = st.text_input("Mot de passe étudiant :", value=current_config["global_password"])
         new_teacher_pwd = st.text_input("Mot de passe Enseignant (illimité) :", value=current_config["teacher_pwd"])
         
         st.divider()
-        # 2. Horaires
         new_time_rest = st.checkbox("Restreindre par horaires", value=current_config["time_restriction"])
         new_start = st.time_input("Heure d'ouverture", value=datetime.strptime(current_config["start_time"], "%H:%M").time())
         new_end = st.time_input("Heure de fermeture", value=datetime.strptime(current_config["end_time"], "%H:%M").time())
         
         st.divider()
-        # 3. Quotas
         new_max_attempts = st.number_input("Essais max / jour / étudiant", min_value=1, value=current_config["max_attempts"])
         new_max_conc = st.number_input("Étudiants en parallèle (File d'attente)", min_value=1, max_value=10, value=current_config["max_concurrent"])
         
@@ -107,14 +118,40 @@ with st.sidebar:
             st.success("Paramètres enregistrés avec succès !")
             
         st.divider()
+        st.subheader("📊 Export des résultats")
+        if s3:
+            if st.button("📥 Compiler et télécharger l'historique (CSV)", use_container_width=True):
+                with st.spinner("Génération du fichier en cours..."):
+                    try:
+                        response = s3.list_objects_v2(Bucket=st.secrets['R2_BUCKET_NAME'], Prefix="resultats_ecos/")
+                        if 'Contents' in response:
+                            output = StringIO()
+                            writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+                            writer.writerow(["Date", "Utilisateur", "Profil", "Cas Clinique", "Bilan IA"])
+                            
+                            for obj in response['Contents']:
+                                file_resp = s3.get_object(Bucket=st.secrets['R2_BUCKET_NAME'], Key=obj['Key'])
+                                data = json.loads(file_resp['Body'].read().decode('utf-8'))
+                                writer.writerow([data.get("Date"), data.get("Utilisateur"), data.get("Profil"), data.get("Cas_Clinique"), data.get("Bilan_IA")])
+                            
+                            csv_bytes = output.getvalue().encode('utf-8')
+                            st.download_button(label="⬇️ Cliquez ici pour télécharger le CSV", data=csv_bytes, file_name=f"Historique_ECOS_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv", use_container_width=True)
+                        else:
+                            st.info("Aucune donnée enregistrée pour le moment.")
+                    except Exception as e:
+                        st.error(f"Erreur de lecture R2 : {str(e)}")
+        else:
+            st.warning("⚠️ R2 non configuré dans les secrets.")
+
+        st.divider()
         st.subheader("🛠️ Outils de test")
         if st.button("🧹 Purger les sessions actives", use_container_width=True):
             save_json(ACTIVE_SESSIONS_FILE, {})
-            st.success("Sessions purgées ! Les utilisateurs en cours seront déconnectés à leur prochaine action.")
+            st.success("Sessions purgées !")
             
         if st.button("🔄 Réinitialiser les quotas du jour", use_container_width=True):
             save_json(TRACKING_FILE, {})
-            st.success("Tous les quotas ont été remis à zéro.")
+            st.success("Quotas remis à zéro.")
             
     elif admin_input:
         st.error("Mot de passe incorrect")
@@ -310,8 +347,6 @@ if st.session_state.start_time is None:
 # -----------------------------------------------------------------------------
 # 2. CHARGEMENT DU CAS SÉLECTIONNÉ ET CONFIGURATION
 # -----------------------------------------------------------------------------
-
-# --- VERROU ET RAFRAÎCHISSEMENT DU TEMPS DE PRÉSENCE ---
 if not st.session_state.is_teacher:
     actives_check = clean_active_sessions()
     if st.session_state.student_id not in actives_check:
@@ -319,7 +354,6 @@ if not st.session_state.is_teacher:
         st.session_state.admin_kicked = True
         st.rerun()
     else:
-        # Rafraîchit le timer de l'étudiant à chaque action (évite le kick après 10 minutes)
         actives_check[st.session_state.student_id] = time.time()
         save_json(ACTIVE_SESSIONS_FILE, actives_check)
 
@@ -645,6 +679,31 @@ else:
                 )
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 st.session_state.eval_generated = True
+                
+                # --- SAUVEGARDE DANS CLOUDFLARE R2 ---
+                if s3:
+                    role_str = "Enseignant" if st.session_state.is_teacher else "Etudiant"
+                    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    safe_name = str(st.session_state.student_id).replace(' ', '_').replace('/', '-')
+                    file_key = f"resultats_ecos/{timestamp}_{safe_name}.json"
+                    
+                    data_to_save = {
+                        "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Utilisateur": st.session_state.student_id,
+                        "Profil": role_str,
+                        "Cas_Clinique": id_cas,
+                        "Bilan_IA": response.text
+                    }
+                    try:
+                        s3.put_object(
+                            Bucket=st.secrets['R2_BUCKET_NAME'],
+                            Key=file_key,
+                            Body=json.dumps(data_to_save, ensure_ascii=False),
+                            ContentType="application/json"
+                        )
+                    except Exception as e:
+                        st.error(f"Erreur lors de l'enregistrement vers Cloudflare R2 : {str(e)}")
+                        
             except Exception as e:
                 st.error(f"Erreur évaluation : {str(e)}")
                 
