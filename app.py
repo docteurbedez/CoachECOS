@@ -11,7 +11,7 @@ from streamlit_mic_recorder import mic_recorder
 st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 
 # -----------------------------------------------------------------------------
-# 0. GESTION DES CONFIGURATIONS ET DU FINGERPRINT NAVIGATEUR
+# 0. GESTION DES CONFIGURATIONS ET DU SUIVI DES ESSAIS
 # -----------------------------------------------------------------------------
 CONFIG_FILE = "config_ecos.json"
 TRACKING_FILE = "tracking_ecos.json"
@@ -41,32 +41,6 @@ def save_json(filepath, data):
 
 current_config = load_json(CONFIG_FILE, DEFAULT_CONFIG)
 
-# --- EMPREINTE DU NAVIGATEUR (FINGERPRINT JS) ---
-# Injecte un ID unique dans le stockage du navigateur et le remonte via l'URL
-device_id = st.query_params.get("device_id")
-if not device_id:
-    js_code = """
-    <script>
-    try {
-        let did = localStorage.getItem('ecos_device_id');
-        if (!did) {
-            did = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'id_' + Math.random().toString(36).substring(2);
-            localStorage.setItem('ecos_device_id', did);
-        }
-        const urlParams = new URLSearchParams(window.parent.location.search);
-        if (urlParams.get('device_id') !== did) {
-            urlParams.set('device_id', did);
-            window.parent.location.search = urlParams.toString();
-        }
-    } catch(e) {
-        console.error("Erreur de fingerprint", e);
-    }
-    </script>
-    """
-    components.html(js_code, height=0)
-    st.info("Initialisation de la session sécurisée... Veuillez patienter.")
-    st.stop()
-
 # --- BARRE LATÉRALE : PANNEAU ENSEIGNANT ---
 with st.sidebar:
     st.header("⚙️ Administration ECOS")
@@ -90,7 +64,7 @@ with st.sidebar:
         
         st.divider()
         # 3. Quotas
-        new_max_attempts = st.number_input("Essais max / jour / appareil", min_value=1, value=current_config["max_attempts"])
+        new_max_attempts = st.number_input("Essais max / jour / étudiant", min_value=1, value=current_config["max_attempts"])
         new_max_conc = st.number_input("Étudiants en parallèle (File d'attente)", min_value=1, max_value=10, value=current_config["max_concurrent"])
         
         if st.button("💾 Sauvegarder la configuration", use_container_width=True):
@@ -134,16 +108,13 @@ if "student_id" not in st.session_state:
 
 today_str = datetime.now().strftime("%Y-%m-%d")
 tracking_data = load_json(TRACKING_FILE, {})
-current_device_attempts = tracking_data.get(device_id, {}).get(today_str, 0)
 max_att = current_config["max_attempts"]
 
 if not st.session_state.authenticated:
     st.title("🔒 Accès à l'épreuve ECOS")
-    st.info(f"Votre appareil a consommé {current_device_attempts}/{max_att} essais aujourd'hui.")
     
     with st.form("login_form"):
         student_name = st.text_input("Nom de l'étudiant / Numéro :", placeholder="Ex: Jean Dupont")
-        
         label_pwd = "Mot de passe :" if current_config["require_student_pwd"] else "Mot de passe (réservé Enseignant) :"
         pwd = st.text_input(label_pwd, type="password")
         
@@ -158,10 +129,14 @@ if not st.session_state.authenticated:
                 st.session_state.student_id = f"👨‍🏫 {student_name.strip()}"
                 st.rerun()
             else:
+                # Vérification du quota pour cet identifiant
+                s_id = student_name.strip().lower()
+                current_student_attempts = tracking_data.get(s_id, {}).get(today_str, 0)
+                
                 if current_config["require_student_pwd"] and pwd != current_config["global_password"]:
                     st.error("Mot de passe étudiant incorrect.")
-                elif current_device_attempts >= max_att:
-                    st.error(f"❌ Quota d'essais atteint pour aujourd'hui sur cet appareil ({max_att} max).")
+                elif current_student_attempts >= max_att:
+                    st.error(f"❌ Quota d'essais atteint pour aujourd'hui pour le profil '{student_name}' ({max_att} max).")
                 else:
                     st.session_state.authenticated = True
                     st.session_state.is_teacher = False
@@ -202,6 +177,13 @@ if "show_help" not in st.session_state:
 if st.session_state.start_time is None:
     st.title("Station d'ECOS")
     st.success(f"Connecté en tant que : **{st.session_state.student_id}**")
+    
+    # Affichage du quota restant pour l'étudiant
+    if not st.session_state.is_teacher:
+        s_id = st.session_state.student_id.lower()
+        current_count = tracking_data.get(s_id, {}).get(today_str, 0)
+        st.caption(f"📊 *Essais restants aujourd'hui : {max_att - current_count} / {max_att}*")
+        
     st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'oral.")
 
     index_default = CAS_DISPONIBLES.index(st.session_state.selected_cas)
@@ -215,17 +197,18 @@ if st.session_state.start_time is None:
     if st.button("Démarrer la station (10 minutes)"):
         # Décompte du quota uniquement lors du lancement de l'épreuve (si étudiant)
         if not st.session_state.is_teacher:
+            s_id = st.session_state.student_id.lower()
             tracking_data = load_json(TRACKING_FILE, {})
-            current_count = tracking_data.get(device_id, {}).get(today_str, 0)
+            current_count = tracking_data.get(s_id, {}).get(today_str, 0)
             
             if current_count >= current_config["max_attempts"]:
                 st.error("Vous avez épuisé vos essais depuis votre dernière connexion.")
                 st.session_state.authenticated = False
                 st.rerun()
                 
-            if device_id not in tracking_data:
-                tracking_data[device_id] = {}
-            tracking_data[device_id][today_str] = current_count + 1
+            if s_id not in tracking_data:
+                tracking_data[s_id] = {}
+            tracking_data[s_id][today_str] = current_count + 1
             save_json(TRACKING_FILE, tracking_data)
 
         st.session_state.selected_cas = choix
@@ -302,67 +285,15 @@ with st.expander("Consignes et dossier patient", expanded=True):
         <head>
             <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
             <style>
-                body {{
-                    margin: 0;
-                    padding: 0;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                }}
-                details {{
-                    border: 1px solid #e0e0e0;
-                    border-radius: 8px;
-                    padding: 10px 14px;
-                    background: #ffffff;
-                    margin-top: 10px;
-                }}
-                summary {{
-                    font-weight: 600;
-                    cursor: pointer;
-                    color: #1f2937;
-                    outline: none;
-                }}
-                .viewer-container {{
-                    position: relative;
-                    margin-top: 12px;
-                    width: 100%;
-                    height: 420px;
-                    background-color: #f8f9fa;
-                    border-radius: 6px;
-                    border: 1px solid #dee2e6;
-                    overflow: hidden;
-                }}
-                .viewer-container:fullscreen {{
-                    border: none;
-                    border-radius: 0;
-                }}
-                model-viewer {{
-                    width: 100%;
-                    height: 100%;
-                    outline: none;
-                }}
-                .btn-container {{
-                    position: absolute;
-                    bottom: 12px;
-                    right: 12px;
-                    display: flex;
-                    gap: 8px;
-                    z-index: 10;
-                }}
-                .viewer-btn {{
-                    background-color: #ffffff;
-                    color: #333333;
-                    border: 1px solid #cccccc;
-                    border-radius: 6px;
-                    padding: 6px 12px;
-                    font-size: 13px;
-                    font-weight: 500;
-                    cursor: pointer;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    transition: all 0.2s ease;
-                }}
-                .viewer-btn:hover {{
-                    background-color: #f1f1f1;
-                    border-color: #999999;
-                }}
+                body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
+                details {{ border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px 14px; background: #ffffff; margin-top: 10px; }}
+                summary {{ font-weight: 600; cursor: pointer; color: #1f2937; outline: none; }}
+                .viewer-container {{ position: relative; margin-top: 12px; width: 100%; height: 420px; background-color: #f8f9fa; border-radius: 6px; border: 1px solid #dee2e6; overflow: hidden; }}
+                .viewer-container:fullscreen {{ border: none; border-radius: 0; }}
+                model-viewer {{ width: 100%; height: 100%; outline: none; }}
+                .btn-container {{ position: absolute; bottom: 12px; right: 12px; display: flex; gap: 8px; z-index: 10; }}
+                .viewer-btn {{ background-color: #ffffff; color: #333333; border: 1px solid #cccccc; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s ease; }}
+                .viewer-btn:hover {{ background-color: #f1f1f1; border-color: #999999; }}
             </style>
         </head>
         <body>
@@ -372,45 +303,25 @@ with st.expander("Consignes et dossier patient", expanded=True):
                     <i>Cliquez-glissez pour manipuler la dent. Utilisez la molette pour zoomer.</i>
                 </p>
                 <div class="viewer-container" id="fs-container">
-                    <model-viewer 
-                        id="dent-viewer"
-                        src="{URL_MODELE_3D}" 
-                        alt="Modèle 3D dentaire" 
-                        camera-controls 
-                        shadow-intensity="1">
-                    </model-viewer>
+                    <model-viewer id="dent-viewer" src="{URL_MODELE_3D}" alt="Modèle 3D dentaire" camera-controls shadow-intensity="1"></model-viewer>
                     <div class="btn-container">
                         <button class="viewer-btn" id="btn-fullscreen">⛶ Plein écran</button>
                         <button class="viewer-btn" id="btn-reset">🔄 Réinitialiser</button>
                     </div>
                 </div>
             </details>
-
             <script>
                 const viewer = document.getElementById('dent-viewer');
                 const resetBtn = document.getElementById('btn-reset');
                 const fullscreenBtn = document.getElementById('btn-fullscreen');
                 const container = document.getElementById('fs-container');
-                
-                resetBtn.addEventListener('click', () => {{
-                    viewer.cameraOrbit = '0deg 75deg 105%';
-                    viewer.cameraTarget = 'auto auto auto';
-                    viewer.fieldOfView = 'auto';
-                }});
-
+                resetBtn.addEventListener('click', () => {{ viewer.cameraOrbit = '0deg 75deg 105%'; viewer.cameraTarget = 'auto auto auto'; viewer.fieldOfView = 'auto'; }});
                 fullscreenBtn.addEventListener('click', () => {{
-                    if (!document.fullscreenElement) {{
-                        if (container.requestFullscreen) container.requestFullscreen();
-                        else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen();
-                    }} else {{
-                        if (document.exitFullscreen) document.exitFullscreen();
-                        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-                    }}
+                    if (!document.fullscreenElement) {{ if (container.requestFullscreen) container.requestFullscreen(); else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen(); }} 
+                    else {{ if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); }}
                 }});
-                
                 document.addEventListener('fullscreenchange', () => {{
-                    if (document.fullscreenElement) fullscreenBtn.innerHTML = '✖ Quitter plein écran';
-                    else fullscreenBtn.innerHTML = '⛶ Plein écran';
+                    if (document.fullscreenElement) fullscreenBtn.innerHTML = '✖ Quitter plein écran'; else fullscreenBtn.innerHTML = '⛶ Plein écran';
                 }});
             </script>
         </body>
