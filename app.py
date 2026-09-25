@@ -39,7 +39,10 @@ def save_json(filepath, data):
     with open(filepath, "w") as f:
         json.dump(data, f)
 
-current_config = load_json(CONFIG_FILE, DEFAULT_CONFIG)
+# Fusion sécurisée : on ajoute les clés manquantes à l'ancien fichier de config
+saved_config = load_json(CONFIG_FILE, {})
+current_config = DEFAULT_CONFIG.copy()
+current_config.update(saved_config)
 
 # --- BARRE LATÉRALE : PANNEAU ENSEIGNANT ---
 with st.sidebar:
@@ -52,9 +55,9 @@ with st.sidebar:
         st.subheader("Règles d'accès étudiants")
         
         # 1. Mode de connexion
-        new_req_pwd = st.checkbox("Exiger un mot de passe étudiant", value=current_config.get("require_student_pwd", True))
-        new_pwd = st.text_input("Mot de passe étudiant :", value=current_config.get("global_password", "ecos"))
-        new_teacher_pwd = st.text_input("Mot de passe Enseignant (illimité) :", value=current_config.get("teacher_pwd", "ens"))
+        new_req_pwd = st.checkbox("Exiger un mot de passe étudiant", value=current_config["require_student_pwd"])
+        new_pwd = st.text_input("Mot de passe étudiant :", value=current_config["global_password"])
+        new_teacher_pwd = st.text_input("Mot de passe Enseignant (illimité) :", value=current_config["teacher_pwd"])
         
         st.divider()
         # 2. Horaires
@@ -87,7 +90,7 @@ with st.sidebar:
 # 0.5. VÉRIFICATION DES RESTRICTIONS (HORAIRES ET AUTHENTIFICATION)
 # -----------------------------------------------------------------------------
 # 1. Vérification des horaires (si activée)
-if current_config.get("time_restriction"):
+if current_config["time_restriction"]:
     now = datetime.now().time()
     start_t = datetime.strptime(current_config["start_time"], "%H:%M").time()
     end_t = datetime.strptime(current_config["end_time"], "%H:%M").time()
@@ -129,7 +132,6 @@ if not st.session_state.authenticated:
                 st.session_state.student_id = f"👨‍🏫 {student_name.strip()}"
                 st.rerun()
             else:
-                # Vérification du quota pour cet identifiant
                 s_id = student_name.strip().lower()
                 current_student_attempts = tracking_data.get(s_id, {}).get(today_str, 0)
                 
@@ -195,7 +197,6 @@ if st.session_state.start_time is None:
     )
 
     if st.button("Démarrer la station (10 minutes)"):
-        # Décompte du quota uniquement lors du lancement de l'épreuve (si étudiant)
         if not st.session_state.is_teacher:
             s_id = st.session_state.student_id.lower()
             tracking_data = load_json(TRACKING_FILE, {})
