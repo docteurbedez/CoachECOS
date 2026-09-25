@@ -187,13 +187,22 @@ def reset_to_home():
 # --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
 if st.session_state.start_time is None:
     st.title("Station d'ECOS")
-    st.success(f"Connecté en tant que : **{st.session_state.student_id}**")
     
-    # Affichage du quota restant pour l'étudiant
-    if not st.session_state.is_teacher:
-        s_id = st.session_state.student_id.lower()
-        current_count = tracking_data.get(s_id, {}).get(today_str, 0)
-        st.caption(f"📊 *Essais restants aujourd'hui : {max_att - current_count} / {max_att}*")
+    col_info, col_logout = st.columns([3, 1])
+    with col_info:
+        st.success(f"Connecté en tant que : **{st.session_state.student_id}**")
+        # Affichage du quota restant pour l'étudiant
+        if not st.session_state.is_teacher:
+            s_id = st.session_state.student_id.lower()
+            current_count = tracking_data.get(s_id, {}).get(today_str, 0)
+            st.caption(f"📊 *Essais restants aujourd'hui : {max_att - current_count} / {max_att}*")
+            
+    with col_logout:
+        if st.button("🚪 Déconnexion", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.is_teacher = False
+            st.session_state.student_id = None
+            st.rerun()
         
     st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'oral.")
 
