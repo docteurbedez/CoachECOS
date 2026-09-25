@@ -68,7 +68,7 @@ s3 = get_s3_client()
 def clean_active_sessions():
     sessions = load_json(ACTIVE_SESSIONS_FILE, {})
     now = time.time()
-    # Tolérance portée à 20 minutes (1200 s)
+    # Tolérance portée à 20 minutes (1200 s) pour éviter les déconnexions
     cleaned = {k: v for k, v in sessions.items() if now - v < 1200}
     if len(cleaned) != len(sessions):
         save_json(ACTIVE_SESSIONS_FILE, cleaned)
@@ -139,8 +139,15 @@ with st.sidebar:
                                 data = json.loads(file_resp['Body'].read().decode('utf-8'))
                                 writer.writerow([data.get("Date"), data.get("Utilisateur"), data.get("Profil"), data.get("Cas_Clinique"), data.get("Bilan_IA")])
                             
+                            # Encodage utf-8-sig pour que Excel lise les accents correctement
                             csv_bytes = output.getvalue().encode('utf-8-sig')
-                            st.download_button(label="⬇️ Cliquez ici pour télécharger le CSV", data=csv_bytes, file_name=f"Historique_ECOS_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv", use_container_width=True)
+                            st.download_button(
+                                label="⬇️ Cliquez ici pour télécharger le CSV",
+                                data=csv_bytes,
+                                file_name=f"Historique_ECOS_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
                         else:
                             st.info("Aucune donnée enregistrée pour le moment.")
                     except Exception as e:
@@ -498,6 +505,7 @@ if elapsed < DUREE_LECTURE and not st.session_state.force_end:
             reset_to_home()
             st.rerun()
 
+    # CORRECTION : Le script javascript clique désormais sur "Passer la lecture" au lieu de recharger la page
     js_code_lecture = f"""
     <div id="chrono_lecture" style="background:#FFF3CD; color:#856404; padding:10px; border-radius:6px; font-weight:bold; font-size:16px; font-family:monospace; text-align:center; border: 1px solid #FFEEBA;">
         Synchronisation...
@@ -514,7 +522,14 @@ if elapsed < DUREE_LECTURE and not st.session_state.force_end:
         if (remaining <= 0) {{
             clearInterval(timer);
             display.innerHTML = "Ouverture de l'oral...";
-            window.parent.location.reload();
+            
+            // Simulation du clic sur le bouton pour rester dans la session Streamlit
+            var buttons = window.parent.document.querySelectorAll('button');
+            buttons.forEach(function(btn) {{
+                if (btn.innerText.includes("Passer la lecture")) {{
+                    btn.click();
+                }}
+            }});
         }} else {{
             var mins = Math.floor(remaining / 60);
             var secs = remaining % 60;
