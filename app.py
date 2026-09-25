@@ -138,7 +138,7 @@ with st.sidebar:
                                 data = json.loads(file_resp['Body'].read().decode('utf-8'))
                                 writer.writerow([data.get("Date"), data.get("Utilisateur"), data.get("Profil"), data.get("Cas_Clinique"), data.get("Bilan_IA")])
                             
-                            csv_bytes = output.getvalue().encode('utf-8')
+                            csv_bytes = output.getvalue().encode('utf-8-sig')
                             st.download_button(label="⬇️ Cliquez ici pour télécharger le CSV", data=csv_bytes, file_name=f"Historique_ECOS_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv", use_container_width=True)
                         else:
                             st.info("Aucune donnée enregistrée pour le moment.")
