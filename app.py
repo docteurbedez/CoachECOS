@@ -49,8 +49,8 @@ current_config.update(saved_config)
 def clean_active_sessions():
     sessions = load_json(ACTIVE_SESSIONS_FILE, {})
     now = time.time()
-    # MODIFICATION : Délai réduit à 615s (10 min + 15 sec de marge)
-    cleaned = {k: v for k, v in sessions.items() if now - v < 615}
+    # Délai de nettoyage à 900 secondes (15 minutes). Protège contre les fermetures brutales d'onglets.
+    cleaned = {k: v for k, v in sessions.items() if now - v < 900}
     if len(cleaned) != len(sessions):
         save_json(ACTIVE_SESSIONS_FILE, cleaned)
     return cleaned
@@ -122,7 +122,6 @@ with st.sidebar:
 # -----------------------------------------------------------------------------
 # 0.5. VÉRIFICATION DES RESTRICTIONS (HORAIRES ET AUTHENTIFICATION)
 # -----------------------------------------------------------------------------
-# 1. Vérification des horaires (si activée)
 if current_config["time_restriction"]:
     now = datetime.now().time()
     start_t = datetime.strptime(current_config["start_time"], "%H:%M").time()
@@ -134,7 +133,6 @@ if current_config["time_restriction"]:
         st.warning(f"L'accès à la station d'ECOS n'est autorisé qu'entre {current_config['start_time']} et {current_config['end_time']}.")
         st.stop()
 
-# 2. Gestion de l'authentification et des quotas
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "is_teacher" not in st.session_state:
@@ -184,14 +182,12 @@ if not st.session_state.authenticated:
 # -----------------------------------------------------------------------------
 # 1. DÉTECTION ET SÉLECTION DU CAS CLINIQUE (1 À 8)
 # -----------------------------------------------------------------------------
-
 CAS_DISPONIBLES = [str(i) for i in range(1, 9) if str(i) in st.secrets]
 
 if not CAS_DISPONIBLES:
-    st.error("Erreur : Aucun cas clinique (de '1' à '8') n'a été trouvé dans les Secrets de Streamlit.")
+    st.error("Erreur : Aucun cas clinique n'a été trouvé.")
     st.stop()
 
-# Initialisation de l'état de session
 if "start_time" not in st.session_state:
     st.session_state.start_time = None
 if "messages" not in st.session_state:
@@ -210,7 +206,6 @@ if "last_audio_id_3" not in st.session_state:
 if "show_help" not in st.session_state:
     st.session_state.show_help = False
 
-# Fonction pour revenir à l'accueil
 def reset_to_home():
     if st.session_state.student_id:
         remove_active_session(st.session_state.student_id)
@@ -226,7 +221,7 @@ def reset_to_home():
 if st.session_state.start_time is None:
     
     if st.session_state.get("admin_kicked", False):
-        st.error("⚠️ Votre station a été interrompue par l'administrateur (Maintenance ou réinitialisation).")
+        st.error("⚠️ Votre station a été interrompue (Temps de connexion expiré ou maintenance).")
         st.session_state.admin_kicked = False
         
     if st.session_state.waiting_in_queue:
@@ -316,13 +311,17 @@ if st.session_state.start_time is None:
 # 2. CHARGEMENT DU CAS SÉLECTIONNÉ ET CONFIGURATION
 # -----------------------------------------------------------------------------
 
-# --- VERROU D'INTERRUPTION ADMINISTRATEUR ---
+# --- VERROU ET RAFRAÎCHISSEMENT DU TEMPS DE PRÉSENCE ---
 if not st.session_state.is_teacher:
     actives_check = clean_active_sessions()
     if st.session_state.student_id not in actives_check:
         reset_to_home()
         st.session_state.admin_kicked = True
         st.rerun()
+    else:
+        # Rafraîchit le timer de l'étudiant à chaque action (évite le kick après 10 minutes)
+        actives_check[st.session_state.student_id] = time.time()
+        save_json(ACTIVE_SESSIONS_FILE, actives_check)
 
 id_cas = st.session_state.selected_cas
 cas_data = st.secrets[id_cas]
@@ -477,16 +476,6 @@ if elapsed < DUREE_LECTURE and not st.session_state.force_end:
             display.innerHTML = "⏳ Phase de lecture — " + form;
         }}
     }}, 500);
-    
-    // TENTATIVE DE LIBÉRATION DE LA PLACE À LA FERMETURE DE L'ONGLET
-    window.addEventListener("beforeunload", function (e) {{
-        var buttons = window.parent.document.querySelectorAll('button');
-        buttons.forEach(function(btn) {{
-            if (btn.innerText.includes("Retour accueil")) {{
-                btn.click();
-            }}
-        }});
-    }});
     </script>
     """
     with col1:
@@ -553,16 +542,6 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             display.innerHTML = "⏱️ Phase d'oral — " + form;
         }}
     }}, 500);
-    
-    // TENTATIVE DE LIBÉRATION DE LA PLACE À LA FERMETURE DE L'ONGLET
-    window.addEventListener("beforeunload", function (e) {{
-        var buttons = window.parent.document.querySelectorAll('button');
-        buttons.forEach(function(btn) {{
-            if (btn.innerText.includes("Retour accueil")) {{
-                btn.click();
-            }}
-        }});
-    }});
     </script>
     """
     with col_chrono:
