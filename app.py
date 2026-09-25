@@ -49,8 +49,8 @@ current_config.update(saved_config)
 def clean_active_sessions():
     sessions = load_json(ACTIVE_SESSIONS_FILE, {})
     now = time.time()
-    # On supprime les sessions inactives depuis plus de 12 minutes (720s) pour éviter les blocages si fermeture de l'onglet
-    cleaned = {k: v for k, v in sessions.items() if now - v < 720}
+    # MODIFICATION : Délai réduit à 615s (10 min + 15 sec de marge)
+    cleaned = {k: v for k, v in sessions.items() if now - v < 615}
     if len(cleaned) != len(sessions):
         save_json(ACTIVE_SESSIONS_FILE, cleaned)
     return cleaned
@@ -225,22 +225,18 @@ def reset_to_home():
 # --- ÉCRAN DE DÉMARRAGE ET FILE D'ATTENTE ---
 if st.session_state.start_time is None:
     
-    # Affichage du message d'interruption s'il y a lieu
     if st.session_state.get("admin_kicked", False):
         st.error("⚠️ Votre station a été interrompue par l'administrateur (Maintenance ou réinitialisation).")
         st.session_state.admin_kicked = False
         
-    # Si l'utilisateur a cliqué sur Démarrer et est dans la file d'attente
     if st.session_state.waiting_in_queue:
         st.title("⏳ File d'attente")
         actives = clean_active_sessions()
         
-        # Si une place se libère ou si c'est le professeur (qui contourne la file)
         if len(actives) < current_config["max_concurrent"] or st.session_state.is_teacher:
             add_active_session(st.session_state.student_id)
             st.session_state.waiting_in_queue = False
             
-            # Consommation de l'essai seulement au moment d'entrer
             if not st.session_state.is_teacher:
                 s_id = st.session_state.student_id.lower()
                 tracking_data = load_json(TRACKING_FILE, {})
@@ -253,20 +249,18 @@ if st.session_state.start_time is None:
             st.session_state.start_time = time.time()
             st.rerun()
         else:
-            # File d'attente active
             st.warning("⚠️ Toutes les stations d'examen sont actuellement occupées (limitation de l'API IA).")
             st.info("Vous êtes dans la file d'attente. Votre examen démarrera automatiquement dès qu'une place se libérera.")
             
             with st.spinner("Recherche d'une place disponible..."):
-                time.sleep(5) # Rafraîchissement toutes les 5 secondes
+                time.sleep(5)
                 
             if st.button("🚪 Quitter la file d'attente et revenir à l'accueil", use_container_width=True):
                 st.session_state.waiting_in_queue = False
                 st.rerun()
             
-            st.rerun() # Boucle de la file d'attente
+            st.rerun()
 
-    # Si l'utilisateur est sur l'écran d'accueil normal
     else:
         st.title("Station d'ECOS")
         actives = clean_active_sessions()
@@ -275,13 +269,11 @@ if st.session_state.start_time is None:
         with col_info:
             st.success(f"Connecté en tant que : **{st.session_state.student_id}**")
             
-            # Affichage du compteur en direct
             statut_occupation = len(actives)
             limite_occupation = current_config['max_concurrent']
             color = "🟢" if statut_occupation < limite_occupation else "🔴"
             st.caption(f"{color} **Utilisateurs actuellement en épreuve : {statut_occupation} / {limite_occupation}**")
             
-            # Affichage du quota restant pour l'étudiant
             if not st.session_state.is_teacher:
                 s_id = st.session_state.student_id.lower()
                 current_count = tracking_data.get(s_id, {}).get(today_str, 0)
@@ -306,7 +298,6 @@ if st.session_state.start_time is None:
         )
 
         if st.button("Démarrer la station (10 minutes)"):
-            # On vérifie si l'étudiant a encore des essais AVANT de le mettre dans la file d'attente
             if not st.session_state.is_teacher:
                 s_id = st.session_state.student_id.lower()
                 current_count = tracking_data.get(s_id, {}).get(today_str, 0)
@@ -486,6 +477,16 @@ if elapsed < DUREE_LECTURE and not st.session_state.force_end:
             display.innerHTML = "⏳ Phase de lecture — " + form;
         }}
     }}, 500);
+    
+    // TENTATIVE DE LIBÉRATION DE LA PLACE À LA FERMETURE DE L'ONGLET
+    window.addEventListener("beforeunload", function (e) {{
+        var buttons = window.parent.document.querySelectorAll('button');
+        buttons.forEach(function(btn) {{
+            if (btn.innerText.includes("Retour accueil")) {{
+                btn.click();
+            }}
+        }});
+    }});
     </script>
     """
     with col1:
@@ -552,6 +553,16 @@ elif elapsed < DUREE_TOTALE and not st.session_state.force_end:
             display.innerHTML = "⏱️ Phase d'oral — " + form;
         }}
     }}, 500);
+    
+    // TENTATIVE DE LIBÉRATION DE LA PLACE À LA FERMETURE DE L'ONGLET
+    window.addEventListener("beforeunload", function (e) {{
+        var buttons = window.parent.document.querySelectorAll('button');
+        buttons.forEach(function(btn) {{
+            if (btn.innerText.includes("Retour accueil")) {{
+                btn.click();
+            }}
+        }});
+    }});
     </script>
     """
     with col_chrono:
