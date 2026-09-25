@@ -105,6 +105,17 @@ with st.sidebar:
             })
             save_json(CONFIG_FILE, current_config)
             st.success("Paramètres enregistrés avec succès !")
+            
+        st.divider()
+        st.subheader("🛠️ Outils de test")
+        if st.button("🧹 Purger les sessions actives", use_container_width=True):
+            save_json(ACTIVE_SESSIONS_FILE, {})
+            st.success("Sessions purgées ! Les utilisateurs en cours seront déconnectés à leur prochaine action.")
+            
+        if st.button("🔄 Réinitialiser les quotas du jour", use_container_width=True):
+            save_json(TRACKING_FILE, {})
+            st.success("Tous les quotas ont été remis à zéro.")
+            
     elif admin_input:
         st.error("Mot de passe incorrect")
 
@@ -214,6 +225,11 @@ def reset_to_home():
 # --- ÉCRAN DE DÉMARRAGE ET FILE D'ATTENTE ---
 if st.session_state.start_time is None:
     
+    # Affichage du message d'interruption s'il y a lieu
+    if st.session_state.get("admin_kicked", False):
+        st.error("⚠️ Votre station a été interrompue par l'administrateur (Maintenance ou réinitialisation).")
+        st.session_state.admin_kicked = False
+        
     # Si l'utilisateur a cliqué sur Démarrer et est dans la file d'attente
     if st.session_state.waiting_in_queue:
         st.title("⏳ File d'attente")
@@ -308,6 +324,15 @@ if st.session_state.start_time is None:
 # -----------------------------------------------------------------------------
 # 2. CHARGEMENT DU CAS SÉLECTIONNÉ ET CONFIGURATION
 # -----------------------------------------------------------------------------
+
+# --- VERROU D'INTERRUPTION ADMINISTRATEUR ---
+if not st.session_state.is_teacher:
+    actives_check = clean_active_sessions()
+    if st.session_state.student_id not in actives_check:
+        reset_to_home()
+        st.session_state.admin_kicked = True
+        st.rerun()
+
 id_cas = st.session_state.selected_cas
 cas_data = st.secrets[id_cas]
 
