@@ -15,6 +15,7 @@ st.set_page_config(page_title="Simulation Oral ECOS", layout="centered")
 # -----------------------------------------------------------------------------
 CONFIG_FILE = "config_ecos.json"
 TRACKING_FILE = "tracking_ecos.json"
+ACTIVE_SESSIONS_FILE = "active_sessions.json"
 
 DEFAULT_CONFIG = {
     "require_student_pwd": True,
@@ -39,10 +40,31 @@ def save_json(filepath, data):
     with open(filepath, "w") as f:
         json.dump(data, f)
 
-# Fusion sécurisée : on ajoute les clés manquantes à l'ancien fichier de config
+# Fusion sécurisée de la configuration
 saved_config = load_json(CONFIG_FILE, {})
 current_config = DEFAULT_CONFIG.copy()
 current_config.update(saved_config)
+
+# --- FONCTIONS DE LA FILE D'ATTENTE ---
+def clean_active_sessions():
+    sessions = load_json(ACTIVE_SESSIONS_FILE, {})
+    now = time.time()
+    # On supprime les sessions inactives depuis plus de 12 minutes (720s) pour éviter les blocages si fermeture de l'onglet
+    cleaned = {k: v for k, v in sessions.items() if now - v < 720}
+    if len(cleaned) != len(sessions):
+        save_json(ACTIVE_SESSIONS_FILE, cleaned)
+    return cleaned
+
+def add_active_session(user_id):
+    sessions = clean_active_sessions()
+    sessions[user_id] = time.time()
+    save_json(ACTIVE_SESSIONS_FILE, sessions)
+
+def remove_active_session(user_id):
+    sessions = clean_active_sessions()
+    if user_id in sessions:
+        del sessions[user_id]
+        save_json(ACTIVE_SESSIONS_FILE, sessions)
 
 # --- BARRE LATÉRALE : PANNEAU ENSEIGNANT ---
 with st.sidebar:
@@ -108,6 +130,8 @@ if "is_teacher" not in st.session_state:
     st.session_state.is_teacher = False
 if "student_id" not in st.session_state:
     st.session_state.student_id = None
+if "waiting_in_queue" not in st.session_state:
+    st.session_state.waiting_in_queue = False
 
 today_str = datetime.now().strftime("%Y-%m-%d")
 tracking_data = load_json(TRACKING_FILE, {})
@@ -177,63 +201,109 @@ if "show_help" not in st.session_state:
 
 # Fonction pour revenir à l'accueil
 def reset_to_home():
+    if st.session_state.student_id:
+        remove_active_session(st.session_state.student_id)
     st.session_state.start_time = None
     st.session_state.messages = []
     st.session_state.eval_generated = False
     st.session_state.force_end = False
     st.session_state.last_audio_id_2 = None
     st.session_state.last_audio_id_3 = None
+    st.session_state.waiting_in_queue = False
 
-# --- ÉCRAN DE DÉMARRAGE AVEC SÉLECTEUR ---
+# --- ÉCRAN DE DÉMARRAGE ET FILE D'ATTENTE ---
 if st.session_state.start_time is None:
-    st.title("Station d'ECOS")
     
-    col_info, col_logout = st.columns([3, 1])
-    with col_info:
-        st.success(f"Connecté en tant que : **{st.session_state.student_id}**")
-        # Affichage du quota restant pour l'étudiant
-        if not st.session_state.is_teacher:
-            s_id = st.session_state.student_id.lower()
-            current_count = tracking_data.get(s_id, {}).get(today_str, 0)
-            st.caption(f"📊 *Essais restants aujourd'hui : {max_att - current_count} / {max_att}*")
-            
-    with col_logout:
-        if st.button("🚪 Déconnexion", use_container_width=True):
-            st.session_state.authenticated = False
-            st.session_state.is_teacher = False
-            st.session_state.student_id = None
-            st.rerun()
+    # Si l'utilisateur a cliqué sur Démarrer et est dans la file d'attente
+    if st.session_state.waiting_in_queue:
+        st.title("⏳ File d'attente")
+        actives = clean_active_sessions()
         
-    st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'oral.")
-
-    index_default = CAS_DISPONIBLES.index(st.session_state.selected_cas)
-    choix = st.selectbox(
-        "Sélectionnez le cas clinique :",
-        options=CAS_DISPONIBLES,
-        index=index_default,
-        format_func=lambda x: f"Cas clinique n° {x}"
-    )
-
-    if st.button("Démarrer la station (10 minutes)"):
-        if not st.session_state.is_teacher:
-            s_id = st.session_state.student_id.lower()
-            tracking_data = load_json(TRACKING_FILE, {})
-            current_count = tracking_data.get(s_id, {}).get(today_str, 0)
+        # Si une place se libère ou si c'est le professeur (qui contourne la file)
+        if len(actives) < current_config["max_concurrent"] or st.session_state.is_teacher:
+            add_active_session(st.session_state.student_id)
+            st.session_state.waiting_in_queue = False
             
-            if current_count >= current_config["max_attempts"]:
-                st.error("Vous avez épuisé vos essais depuis votre dernière connexion.")
-                st.session_state.authenticated = False
-                st.rerun()
+            # Consommation de l'essai seulement au moment d'entrer
+            if not st.session_state.is_teacher:
+                s_id = st.session_state.student_id.lower()
+                tracking_data = load_json(TRACKING_FILE, {})
+                current_count = tracking_data.get(s_id, {}).get(today_str, 0)
+                if s_id not in tracking_data:
+                    tracking_data[s_id] = {}
+                tracking_data[s_id][today_str] = current_count + 1
+                save_json(TRACKING_FILE, tracking_data)
                 
-            if s_id not in tracking_data:
-                tracking_data[s_id] = {}
-            tracking_data[s_id][today_str] = current_count + 1
-            save_json(TRACKING_FILE, tracking_data)
+            st.session_state.start_time = time.time()
+            st.rerun()
+        else:
+            # File d'attente active
+            st.warning("⚠️ Toutes les stations d'examen sont actuellement occupées (limitation de l'API IA).")
+            st.info("Vous êtes dans la file d'attente. Votre examen démarrera automatiquement dès qu'une place se libérera.")
+            
+            with st.spinner("Recherche d'une place disponible..."):
+                time.sleep(5) # Rafraîchissement toutes les 5 secondes
+                
+            if st.button("🚪 Quitter la file d'attente et revenir à l'accueil", use_container_width=True):
+                st.session_state.waiting_in_queue = False
+                st.rerun()
+            
+            st.rerun() # Boucle de la file d'attente
 
-        st.session_state.selected_cas = choix
-        st.session_state.start_time = time.time()
-        st.rerun()
-    st.stop()
+    # Si l'utilisateur est sur l'écran d'accueil normal
+    else:
+        st.title("Station d'ECOS")
+        actives = clean_active_sessions()
+        
+        col_info, col_logout = st.columns([3, 1])
+        with col_info:
+            st.success(f"Connecté en tant que : **{st.session_state.student_id}**")
+            
+            # Affichage du compteur en direct
+            statut_occupation = len(actives)
+            limite_occupation = current_config['max_concurrent']
+            color = "🟢" if statut_occupation < limite_occupation else "🔴"
+            st.caption(f"{color} **Utilisateurs actuellement en épreuve : {statut_occupation} / {limite_occupation}**")
+            
+            # Affichage du quota restant pour l'étudiant
+            if not st.session_state.is_teacher:
+                s_id = st.session_state.student_id.lower()
+                current_count = tracking_data.get(s_id, {}).get(today_str, 0)
+                st.caption(f"📊 *Essais restants aujourd'hui : {max_att - current_count} / {max_att}*")
+                
+        with col_logout:
+            if st.button("🚪 Déconnexion", use_container_width=True):
+                reset_to_home()
+                st.session_state.authenticated = False
+                st.session_state.is_teacher = False
+                st.session_state.student_id = None
+                st.rerun()
+            
+        st.info("L'épreuve comprend 2 minutes de lecture des consignes (saisie bloquée), suivies de 8 minutes d'oral.")
+
+        index_default = CAS_DISPONIBLES.index(st.session_state.selected_cas)
+        choix = st.selectbox(
+            "Sélectionnez le cas clinique :",
+            options=CAS_DISPONIBLES,
+            index=index_default,
+            format_func=lambda x: f"Cas clinique n° {x}"
+        )
+
+        if st.button("Démarrer la station (10 minutes)"):
+            # On vérifie si l'étudiant a encore des essais AVANT de le mettre dans la file d'attente
+            if not st.session_state.is_teacher:
+                s_id = st.session_state.student_id.lower()
+                current_count = tracking_data.get(s_id, {}).get(today_str, 0)
+                
+                if current_count >= current_config["max_attempts"]:
+                    st.error("Vous avez épuisé vos essais pour aujourd'hui.")
+                    st.session_state.authenticated = False
+                    st.rerun()
+
+            st.session_state.selected_cas = choix
+            st.session_state.waiting_in_queue = True
+            st.rerun()
+        st.stop()
 
 # -----------------------------------------------------------------------------
 # 2. CHARGEMENT DU CAS SÉLECTIONNÉ ET CONFIGURATION
