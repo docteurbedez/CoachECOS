@@ -68,7 +68,8 @@ s3 = get_s3_client()
 def clean_active_sessions():
     sessions = load_json(ACTIVE_SESSIONS_FILE, {})
     now = time.time()
-    cleaned = {k: v for k, v in sessions.items() if now - v < 900}
+    # Tolérance portée à 20 minutes (1200 s)
+    cleaned = {k: v for k, v in sessions.items() if now - v < 1200}
     if len(cleaned) != len(sessions):
         save_json(ACTIVE_SESSIONS_FILE, cleaned)
     return cleaned
@@ -351,12 +352,19 @@ if st.session_state.start_time is None:
 # -----------------------------------------------------------------------------
 # 2. CHARGEMENT DU CAS SÉLECTIONNÉ ET CONFIGURATION
 # -----------------------------------------------------------------------------
+# --- VERROU ET RAFRAÎCHISSEMENT DU TEMPS DE PRÉSENCE ---
 if not st.session_state.is_teacher:
     actives_check = clean_active_sessions()
+    # On s'assure que l'étudiant est toujours enregistré ; s'il a disparu par anomalie, on le réinscrit au lieu de l'expulser
     if st.session_state.student_id not in actives_check:
-        reset_to_home()
-        st.session_state.admin_kicked = True
-        st.rerun()
+        # S'il a été purgé explicitement via le bouton admin, on le kicke
+        if st.session_state.get("admin_kicked", False):
+            reset_to_home()
+            st.rerun()
+        else:
+            # Sinon, simple micro-déconnexion réseau : on rétablit sa session
+            actives_check[st.session_state.student_id] = time.time()
+            save_json(ACTIVE_SESSIONS_FILE, actives_check)
     else:
         actives_check[st.session_state.student_id] = time.time()
         save_json(ACTIVE_SESSIONS_FILE, actives_check)
@@ -518,6 +526,18 @@ if elapsed < DUREE_LECTURE and not st.session_state.force_end:
     """
     with col1:
         components.html(js_code_lecture, height=50)
+        
+    # Heartbeat pour garder la connexion active pendant les 2 min de lecture silencieuse
+    js_keepalive = """
+    <script>
+    if (!window.keepAliveInterval) {
+        window.keepAliveInterval = setInterval(function() {
+            window.parent.postMessage({type: 'streamlit:keepAlive'}, '*');
+        }, 25000);
+    }
+    </script>
+    """
+    components.html(js_keepalive, height=0)
         
     st.caption("Le champ de réponse est verrouillé pendant la lecture.")
 
