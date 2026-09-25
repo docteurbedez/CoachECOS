@@ -48,14 +48,18 @@ current_config = DEFAULT_CONFIG.copy()
 current_config.update(saved_config)
 
 # Initialisation du client S3 pour Cloudflare R2
-@st.cache_resource
 def get_s3_client():
     if "R2_ACCOUNT_ID" in st.secrets:
-        return boto3.client('s3',
-            endpoint_url=f"https://{st.secrets['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
-            aws_access_key_id=st.secrets['R2_ACCESS_KEY'],
-            aws_secret_access_key=st.secrets['R2_SECRET_KEY']
-        )
+        try:
+            return boto3.client('s3',
+                endpoint_url=f"https://{st.secrets['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+                aws_access_key_id=st.secrets['R2_ACCESS_KEY'],
+                aws_secret_access_key=st.secrets['R2_SECRET_KEY'],
+                region_name="auto"
+            )
+        except Exception as e:
+            st.sidebar.error(f"Erreur init S3 : {e}")
+            return None
     return None
 
 s3 = get_s3_client()
